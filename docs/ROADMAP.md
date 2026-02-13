@@ -99,9 +99,9 @@ Phase 0 (当前)   Phase 1        Phase 2a       Phase 2b       Phase 2c       P
   - DoD：每次对话后显示 token 用量和估算费用（WebChat 显示模型名 + tokens + 费用）
 
 ### 1.3 CLI 工具
-- [ ] `crabcrush onboard` — 向导式引导配置
+- [x] `crabcrush onboard` — 向导式引导配置
   - DoD：新用户跟着向导走完，配置文件自动生成
-- [ ] `crabcrush doctor` — 自检诊断
+- [x] `crabcrush doctor` — 自检诊断
   - DoD：检查 Node 版本、配置文件、API Key 有效性、网络连通性
 
 **里程碑（= V1 发布）：在钉钉里能和 DeepSeek / 通义千问纯对话。模型切换只需改配置。**

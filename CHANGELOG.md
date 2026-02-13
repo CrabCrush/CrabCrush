@@ -8,6 +8,24 @@
 
 ### 2026-02-13
 
+#### feat: CLI tools - crabcrush onboard + doctor
+
+新用户引导和自检诊断。
+
+- **`crabcrush onboard`** — 向导式配置：
+  - 交互式选择模型提供商（DeepSeek / 通义千问 / Kimi / GLM / 豆包）
+  - 输入 API Key（附带各平台获取链接）
+  - 选择模型（提供默认值）
+  - 可选配置钉钉机器人
+  - 自动生成 `crabcrush.yaml`
+- **`crabcrush doctor`** — 自检诊断：
+  - Node.js 版本检查（>= 20）
+  - 配置文件检测（YAML 文件 / 环境变量）
+  - 模型配置校验（API Key 预览）
+  - API 连通性测试（10s 超时，区分 401 / 网络错误）
+  - 渠道状态汇总
+  - 所有检查通过 / 有问题的清晰反馈
+
 #### feat: model router, failover, cost estimation
 
 智能模型路由 + 自动 Failover + 费用估算。

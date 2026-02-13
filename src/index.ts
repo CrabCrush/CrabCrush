@@ -8,6 +8,8 @@ import { ModelRouter } from './models/router.js';
 import { AgentRuntime } from './agent/runtime.js';
 import { startGateway } from './gateway/server.js';
 import { DingTalkAdapter } from './channels/dingtalk.js';
+import { runDoctor } from './cli/doctor.js';
+import { runOnboard } from './cli/onboard.js';
 import type { ChannelAdapter } from './channels/types.js';
 
 const program = new Command();
@@ -133,6 +135,20 @@ program
 
     process.on('SIGINT', shutdown);
     process.on('SIGTERM', shutdown);
+  });
+
+program
+  .command('doctor')
+  .description('自检诊断（检查环境、配置、网络连通性）')
+  .action(async () => {
+    await runDoctor();
+  });
+
+program
+  .command('onboard')
+  .description('向导式引导配置（创建 crabcrush.yaml）')
+  .action(async () => {
+    await runOnboard();
   });
 
 program.parse();

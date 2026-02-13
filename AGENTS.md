@@ -164,9 +164,10 @@ V1 只做 WebChat + 钉钉两个渠道、DeepSeek + 通义千问两个模型的*
 - [x] 费用估算：对话后显示模型名 + token 用量 + 估算费用
 - [x] 安全原则 DEC-026 + 产品定位 + CHANGELOG + 钉钉接入指南
 
+- [x] CLI 工具：`crabcrush onboard`（向导式配置）、`crabcrush doctor`（自检诊断）
+
 ### 下一步
-- [ ] CLI 工具：`crabcrush onboard`（向导式配置）、`crabcrush doctor`（自检诊断）
-- [ ] Phase 1 收尾 → V1 发布
+- [ ] Phase 1 收尾 → V1 发布（ESLint + CI/CD + 整体验收）
 
 ### 文档体系
 | 文件 | 作用 | 何时读 |

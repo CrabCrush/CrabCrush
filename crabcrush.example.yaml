@@ -1,0 +1,31 @@
+# CrabCrush 配置文件示例
+# 复制为 crabcrush.yaml 并修改
+
+# 服务端口（默认 18790）
+port: 18790
+
+# 绑定地址：loopback 仅本机访问，all 允许外部访问
+bind: loopback
+
+# 模型配置
+# 支持 DeepSeek、通义千问(qwen)、Kimi、智谱GLM(glm)、豆包(doubao) 等
+# 已知提供商不需要填 baseURL，自动补全
+models:
+  deepseek:
+    apiKey: sk-your-deepseek-api-key
+    # baseURL: https://api.deepseek.com/v1  # 可省略
+    # defaultModel: deepseek-chat            # 可省略
+
+  # qwen:
+  #   apiKey: sk-your-qwen-api-key
+  #   defaultModel: qwen-max
+
+# Agent 配置
+agent:
+  model: deepseek-chat
+  systemPrompt: "你是 CrabCrush，一个友好的 AI 助手。请用中文回复。"
+  maxTokens: 4096
+
+# 也可以通过环境变量配置 API Key：
+# export CRABCRUSH_DEEPSEEK_API_KEY=sk-xxx
+# export CRABCRUSH_QWEN_API_KEY=sk-xxx

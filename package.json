@@ -26,8 +26,12 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@fastify/static": "^9.0.0",
+    "@fastify/websocket": "^11.2.0",
     "commander": "^14.0.3",
-    "fastify": "^5.7.4"
+    "fastify": "^5.7.4",
+    "yaml": "^2.8.2",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/node": "^25.2.3",
@@ -36,6 +40,8 @@
     "vitest": "^4.0.18"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }

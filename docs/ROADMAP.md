@@ -87,14 +87,16 @@ Phase 0 (当前)   Phase 1        Phase 2a       Phase 2b       Phase 2c       P
   - DoD：同一群内不同用户 @机器人，各自上下文独立（按 senderStaffId 隔离）
 
 ### 1.2 模型层完善
+- [x] 模型路由器（自动匹配提供商 + 显式 `providerId/modelName` 格式）
+  - DoD：`agent.model: qwen-max` 自动路由到 qwen 提供商，多提供商不再发错 API
 - [ ] 统一模型接口 + 能力探测（详见 DEC-009）
   - DoD：ModelProvider 接口 + ModelCapabilities 定义完成，有单元测试
 - [x] 通义千问接入（第二个模型）
   - DoD：通过修改配置文件（不改代码）切换到通义千问，对话正常
-- [ ] 模型 Failover
+- [x] 模型 Failover
   - DoD：主模型返回 500/超时时，自动切换到备选模型，用户无感知
-- [ ] 费用估算
-  - DoD：每次对话后显示 token 用量和估算费用
+- [x] 费用估算
+  - DoD：每次对话后显示 token 用量和估算费用（WebChat 显示模型名 + tokens + 费用）
 
 ### 1.3 CLI 工具
 - [ ] `crabcrush onboard` — 向导式引导配置

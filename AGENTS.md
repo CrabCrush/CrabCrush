@@ -147,7 +147,7 @@ V1 只做 WebChat + 钉钉两个渠道、DeepSeek + 通义千问两个模型的*
 **项目处于 Phase 1（核心引擎）阶段** — 最后更新：2026-02-13
 
 ### 已完成
-- [x] 项目规划 + 决策记录（19 条，详见 docs/DECISIONS.md）
+- [x] 项目规划 + 决策记录（20 条，详见 docs/DECISIONS.md）
 - [x] 工程脚手架：pnpm + TypeScript strict + Fastify v5 + Commander.js + Zod + Vitest
 - [x] 配置系统：YAML + 环境变量 + Zod 校验，5 个国产模型 baseURL 预置
 - [x] OpenAI 兼容模型适配器：SSE 流式、30s 超时、自动重试、AbortController 中断
@@ -159,16 +159,20 @@ V1 只做 WebChat + 钉钉两个渠道、DeepSeek + 通义千问两个模型的*
 - [x] 通义千问：纯配置接入（OpenAI 兼容适配器，不改代码）
 - [x] 使用文档：钉钉机器人接入指南（guide/dingtalk-setup.md）
 
+- [x] 模型路由器：agent.model 自动匹配提供商，支持 `providerId/modelName` 显式格式
+- [x] 模型 Failover：主模型失败自动切换备选（`agent.fallbackModels`）
+- [x] 费用估算：对话后显示模型名 + token 用量 + 估算费用
+- [x] 安全原则 DEC-026 + 产品定位 + CHANGELOG + 钉钉接入指南
+
 ### 下一步
-- [ ] 模型 Failover：主模型失败自动切换备选
-- [ ] 费用估算：对话后显示 token 用量和估算费用
 - [ ] CLI 工具：`crabcrush onboard`（向导式配置）、`crabcrush doctor`（自检诊断）
+- [ ] Phase 1 收尾 → V1 发布
 
 ### 文档体系
 | 文件 | 作用 | 何时读 |
 |------|------|--------|
 | `AGENTS.md`（本文件） | 项目全貌 + 当前进度 | **第一个读这个** |
-| `docs/DECISIONS.md` | 决策记录（19 条当前有效决策） | **第二个读这个** |
+| `docs/DECISIONS.md` | 决策记录（20 条当前有效决策） | **第二个读这个** |
 | `docs/ROADMAP.md` | 路线图 + 每项任务的验收标准（DoD） | 想知道"下一步做什么" |
 | `docs/DEPLOYMENT_MODES.md` | 部署模式（本地模式 vs 渠道模式） | 想了解"怎么部署" |
 | `docs/ARCHITECTURE.md` | 技术架构、接口设计 | 想了解"怎么实现" |

@@ -29,6 +29,11 @@ export function findConfigPath(): string | null {
  * - 用 Zod 校验
  */
 export function loadConfig(configPath?: string): CrabCrushConfig {
+  // 用户明确指定了配置路径，但文件不存在 → 报错
+  if (configPath && !existsSync(configPath)) {
+    throw new Error(`配置文件不存在: ${configPath}`);
+  }
+
   const path = configPath ?? findConfigPath();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

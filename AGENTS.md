@@ -62,57 +62,55 @@ CrabCrush（小螃蟹）是一个面向中国用户的本地优先个人 AI 助�
 - **语言**：TypeScript（已确认，详见 DEC-002）
 - **运行时**：Node.js >= 20（详见 DEC-002）
 - **包管理**：pnpm（单包项目，非 monorepo，详见 DEC-002）
-- **构建工具**：tsdown（详见 DEC-023）
+- **构建工具**：tsc（当前）；tsdown 待评估（DEC-023）
 - **测试框架**：Vitest
-- **日志**：pino（Fastify 原生集成，详见 DEC-024）
 - **Markdown 渲染**：markdown-it + highlight.js（WebChat 用，详见 DEC-025）
-- **HTTP 框架**：Fastify v5 + @fastify/websocket（详见 DEC-019）
-- **前端**：Vue 3 + Vite（WebChat，详见 DEC-020）
+- **HTTP 框架**：Fastify v5 + @fastify/websocket + @fastify/static（详见 DEC-019）
+- **前端**：单页 HTML（public/index.html）；Vue 3 + Vite 待后续迁移（DEC-020）
 - **CLI**：Commander.js（详见 DEC-021）
 - **配置**：YAML + 环境变量 + Zod 校验（详见 DEC-022）
 - **核心架构**：Gateway（HTTP + WebSocket 控制面）+ Agent Runtime + Channel Adapters
 - **模型接入**：OpenAI 兼容适配器覆盖大部分国产模型（详见 DEC-009）
 - **选型理由**：项目本质是 I/O 密集型消息网关，Node.js 异步模型天然适合；全栈统一语言减少复杂度；快速原型验证
 
-## 目录结构（规划）
+## 目录结构（实际）
 
 ```
 crabcrush/
-├── AGENTS.md              # AI 上下文文件（本文件）— 任何 AI 工具的入口
+├── AGENTS.md              # AI 上下文文件（本文件）
 ├── README.md              # 项目介绍
-├── LICENSE                # GPL-3.0 许可证
 ├── package.json           # 项目依赖
+├── tsconfig.json          # TypeScript 配置
+├── crabcrush.example.yaml # 配置示例
 ├── docs/                  # 项目文档
 │   ├── VISION.md          # 项目愿景与竞品分析
 │   ├── ARCHITECTURE.md    # 技术架构设计
 │   ├── ROADMAP.md         # 开发路线图
-│   ├── DECISIONS.md       # 决策记录（关键选择 + 理由）
-│   └── DEPLOYMENT_MODES.md # 部署模式（本地模式 vs 渠道模式）
+│   ├── DECISIONS.md       # 决策记录
+│   └── DEPLOYMENT_MODES.md # 部署模式
+├── guide/                 # 使用指南
+│   └── dingtalk-setup.md  # 钉钉机器人接入指南
 ├── src/                   # 源代码
-│   ├── gateway/           # 网关核心（HTTP + WebSocket 控制面）
-│   ├── agent/             # Agent 运行时（对话管理、模型调用）
-│   ├── channels/          # 渠道适配器（按开发顺序）
-│   │   ├── base.ts        # ChannelAdapter 基类/接口
-│   │   ├── webchat/       # 网页聊天（1st）
-│   │   ├── dingtalk/      # 钉钉（2nd）
-│   │   ├── feishu/        # 飞书（3rd）
-│   │   ├── wecom/         # 企业微信（4th）
-│   │   └── ...            # 后续渠道
-│   ├── models/            # 模型适配层（详见 DEC-009）
-│   │   ├── base.ts        # ModelProvider 接口
-│   │   ├── openai-compatible.ts  # OpenAI 兼容通用适配器（覆盖大部分模型）
-│   │   ├── configs/       # 各模型配置（baseURL、pricing 等）
-│   │   └── router.ts      # 模型路由 + Failover
-│   ├── skills/            # 技能框架代码（Phase 2，详见 DEC-011/DEC-012）
-│   ├── tools/             # 内置工具（Phase 2）
-│   ├── voice/             # 语音能力（Phase 3）
-│   └── utils/             # 通用工具函数
-├── ui/                    # Web 管理界面（WebChat）
-├── skills/                # 内置技能包（Phase 2，详见 DEC-012）
-├── scripts/               # 构建和运维脚本
+│   ├── index.ts           # CLI 入口（Commander.js）
+│   ├── config/            # 配置加载（YAML + env + Zod）
+│   │   ├── schema.ts      # Zod 校验 schema + KNOWN_PROVIDERS
+│   │   └── loader.ts      # 配置文件查找、环境变量合并
+│   ├── gateway/           # 网关核心
+│   │   └── server.ts      # Fastify HTTP + WebSocket + 静态文件
+│   ├── agent/             # Agent 运行时
+│   │   └── runtime.ts     # 会话管理 + 多轮上下文
+│   ├── models/            # 模型适配层
+│   │   └── provider.ts    # OpenAI 兼容适配器（SSE 流式 + 超时 + 重试）
+│   └── channels/          # 渠道适配器
+│       ├── types.ts       # ChannelAdapter 接口 + ChatHandler 类型
+│       └── dingtalk.ts    # 钉钉 Stream 模式
+├── public/                # WebChat 前端（单页 HTML）
+│   └── index.html         # 聊天界面（Markdown + 代码高亮 + 流式输出）
 └── test/                  # 测试
-# 注意：extensions/ 已移除（详见 DEC-012）
-# 注意：用户自定义技能放在 ~/.crabcrush/workspace/skills/，不在仓库中
+    ├── gateway.test.ts    # Gateway 单元测试
+    ├── config.test.ts     # 配置模块测试
+    ├── models.test.ts     # 模型适配器测试
+    └── channels.test.ts   # 渠道适配器测试
 ```
 
 ## 支持的渠道与模型
@@ -146,7 +144,7 @@ V1 只做 WebChat + 钉钉两个渠道、DeepSeek + 通义千问两个模型的*
 
 ## 当前阶段
 
-**项目处于 Phase 0.3 MVP 阶段** — 最后更新：2026-02-13
+**项目处于 Phase 1（核心引擎）阶段** — 最后更新：2026-02-13
 
 ### 已完成
 - [x] 项目规划 + 决策记录（19 条，详见 docs/DECISIONS.md）
@@ -156,12 +154,15 @@ V1 只做 WebChat + 钉钉两个渠道、DeepSeek + 通义千问两个模型的*
 - [x] Agent Runtime：会话管理 + 多轮上下文
 - [x] Gateway：HTTP + WebSocket + 静态文件 + 统一错误格式 + ping/pong + 优雅关闭
 - [x] WebChat：Markdown 渲染（markdown-it + highlight.js）、代码高亮+复制、停止生成
+- [x] 端到端验证：DeepSeek 单轮+多轮流式对话全链路通过
+- [x] 钉钉渠道：Stream 模式接入，@机器人收发消息，Markdown 自动检测，会话隔离
+- [x] 通义千问：纯配置接入（OpenAI 兼容适配器，不改代码）
+- [x] 使用文档：钉钉机器人接入指南（guide/dingtalk-setup.md）
 
-### 下一步（Phase 0.3 收尾 → Phase 1）
-- [ ] 端到端验证：用真实 DeepSeek API Key 测试完整对话流程
-- [ ] Phase 1：钉钉渠道接入（Stream 模式）
-- [ ] Phase 1：通义千问模型接入（第二个模型）
-- [ ] Phase 1：模型 Failover
+### 下一步
+- [ ] 模型 Failover：主模型失败自动切换备选
+- [ ] 费用估算：对话后显示 token 用量和估算费用
+- [ ] CLI 工具：`crabcrush onboard`（向导式配置）、`crabcrush doctor`（自检诊断）
 
 ### 文档体系
 | 文件 | 作用 | 何时读 |

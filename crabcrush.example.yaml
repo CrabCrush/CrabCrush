@@ -29,7 +29,7 @@ agent:
 # 渠道配置
 channels:
   # 钉钉机器人（Stream 模式，不需要公网 IP）
-  # 需要先在钉钉开放平台创建企业内部应用，获取 clientId 和 clientSecret
+  # 需要先在钉钉开放平台创建企业内部应用，获取 clientId(AppKey) 和 clientSecret(AppSecret)
   # 详见：https://opensource.dingtalk.com/developerpedia/docs/explore/tutorials/stream/bot
   dingtalk:
     enabled: false

@@ -52,10 +52,16 @@ describe('Config Schema', () => {
 });
 
 describe('Config Loader', () => {
-  it('loads defaults when no config file exists', async () => {
-    // loadConfig 在没有配置文件时应返回默认值
+  it('throws when explicit config path does not exist', async () => {
     const { loadConfig } = await import('../src/config/loader.js');
-    const config = loadConfig('/non/existent/path.yaml');
-    expect(config.port).toBe(18790);
+    expect(() => loadConfig('/non/existent/path.yaml')).toThrow('配置文件不存在');
+  });
+
+  it('loads defaults when no config path specified', async () => {
+    // 不传参数时，找不到配置文件应返回默认值
+    const { loadConfig } = await import('../src/config/loader.js');
+    // 注意：如果 cwd 有 crabcrush.yaml 会被读取，这里只验证不报错
+    const config = loadConfig();
+    expect(config.port).toBeDefined();
   });
 });

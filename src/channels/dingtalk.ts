@@ -52,8 +52,19 @@ export class DingTalkAdapter implements ChannelAdapter {
     });
 
     // 建立 Stream 连接
-    await this.client.connect();
-    console.log('   钉钉 Stream 已连接');
+    try {
+      await this.client.connect();
+      console.log('   钉钉 Stream 已连接');
+    } catch (err: unknown) {
+      // 打印详细错误信息帮助排查
+      const e = err as Error & { response?: { status?: number; data?: unknown } };
+      if (e.response) {
+        console.error('   钉钉连接失败，详细信息:');
+        console.error('   HTTP Status:', e.response.status);
+        console.error('   Response:', JSON.stringify(e.response.data, null, 2));
+      }
+      throw err;
+    }
   }
 
   async stop(): Promise<void> {
@@ -71,7 +82,7 @@ export class DingTalkAdapter implements ChannelAdapter {
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async handleMessage(res: any): Promise<void> {
-    if (!this.chatHandler) return;
+    if (!this.chatHandler || !this.client) return;
 
     try {
       const payload = JSON.parse(res.data) as RobotMessage;
@@ -86,7 +97,7 @@ export class DingTalkAdapter implements ChannelAdapter {
       const sessionId = `dingtalk-${payload.senderStaffId}`;
 
       console.log(
-        `[钉钉] ${payload.senderNick}(${payload.senderStaffId}): ${content.slice(0, 50)}...`,
+        `[钉钉] ${payload.senderNick}(${payload.senderStaffId}): ${content.length > 50 ? content.slice(0, 50) + '...' : content}`,
       );
 
       // 调用 Agent 获取回复（收集全部 chunks）
@@ -180,7 +191,7 @@ export class DingTalkAdapter implements ChannelAdapter {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private ack(res: any): void {
     try {
-      this.client.socketCallBackResponse(res.headers?.messageId, '');
+      this.client?.socketCallBackResponse(res.headers?.messageId, '');
     } catch {
       // 忽略 ack 错误
     }

@@ -146,20 +146,22 @@ V1 只做 WebChat + 钉钉两个渠道、DeepSeek + 通义千问两个模型的*
 
 ## 当前阶段
 
-**项目处于规划阶段（Phase 0）** — 最后更新：2026-02-13
+**项目处于 Phase 0.3 MVP 阶段** — 最后更新：2026-02-13
 
 ### 已完成
-- [x] 项目规划：命名（DEC-001）、技术选型（DEC-002）、渠道策略（DEC-003）、V1 硬边界（DEC-011）
-- [x] 技术架构设计（详见 docs/ARCHITECTURE.md）
-- [x] 路线图 + 验收标准（详见 docs/ROADMAP.md）
-- [x] 决策记录（19 条有效决策，详见 docs/DECISIONS.md）
+- [x] 项目规划 + 决策记录（19 条，详见 docs/DECISIONS.md）
+- [x] 工程脚手架：pnpm + TypeScript strict + Fastify v5 + Commander.js + Zod + Vitest
+- [x] 配置系统：YAML + 环境变量 + Zod 校验，5 个国产模型 baseURL 预置
+- [x] OpenAI 兼容模型适配器：SSE 流式、30s 超时、自动重试、AbortController 中断
+- [x] Agent Runtime：会话管理 + 多轮上下文
+- [x] Gateway：HTTP + WebSocket + 静态文件 + 统一错误格式 + ping/pong + 优雅关闭
+- [x] WebChat：Markdown 渲染（markdown-it + highlight.js）、代码高亮+复制、停止生成
 
-### 下一步
-- [ ] git init + .gitignore
-- [ ] 基础项目脚手架（pnpm + TypeScript + Fastify + Vue 3 + Commander.js + Zod）
-- [ ] 核心 Gateway 骨架（Fastify + @fastify/websocket）
-- [ ] DeepSeek 模型接入（OpenAI 兼容适配器）
-- [ ] WebChat 最简原型（Vue 3 + Vite）
+### 下一步（Phase 0.3 收尾 → Phase 1）
+- [ ] 端到端验证：用真实 DeepSeek API Key 测试完整对话流程
+- [ ] Phase 1：钉钉渠道接入（Stream 模式）
+- [ ] Phase 1：通义千问模型接入（第二个模型）
+- [ ] Phase 1：模型 Failover
 
 ### 文档体系
 | 文件 | 作用 | 何时读 |

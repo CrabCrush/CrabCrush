@@ -8,6 +8,26 @@
 
 ### 2026-02-13
 
+#### feat: model router, failover, cost estimation
+
+智能模型路由 + 自动 Failover + 费用估算。
+
+- **模型路由器**（`src/models/router.ts`）：
+  - `agent.model` 自动匹配正确的提供商（`qwen-max` → qwen，`deepseek-chat` → deepseek）
+  - 支持显式格式 `providerId/modelName`（如 `qwen/qwen-max`）
+  - 修复同时配多个提供商时请求发错 API 的问题
+- **Model Failover**：
+  - 新增 `agent.fallbackModels` 配置
+  - 主模型 5xx / 超时 / 网络错误时自动切换备选模型，用户无感知
+  - 4xx 错误（API Key / 余额问题）不触发 Failover
+  - 启动日志显示完整 Failover 链
+- **费用估算**（`src/models/pricing.ts`）：
+  - 内置 DeepSeek / 通义千问 / Kimi / GLM 主要模型定价
+  - WebChat 每次对话后显示：模型名 | token 用量 | 估算费用
+  - 修复 WebChat 在 usage 为空时不显示模型名的 bug
+- 所有已配置的提供商统一初始化，不再只用第一个
+- 新增 12 个测试（ModelRouter 8 个 + 费用估算 3 个 + 原有 1 个），共 24 个
+
 #### chore: review, bug fixes, docs update
 
 项目全面审查 + 修复 + 文档同步。

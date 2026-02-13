@@ -16,13 +16,19 @@ models:
     # baseURL: https://api.deepseek.com/v1  # 可省略
     # defaultModel: deepseek-chat            # 可省略
 
-  # qwen:
-  #   apiKey: sk-your-qwen-api-key
-  #   defaultModel: qwen-max
+#  qwen:
+#    apiKey: sk-your-qwen-api-key
+#    defaultModel: qwen-max
 
 # Agent 配置
 agent:
-  model: deepseek-chat
+  # 模型名称，支持两种格式："deepseek-chat" 自动匹配 deepseek 提供商; "qwen/qwen-max" 显式指定提供商/模型
+  model: deepseek/deepseek-chat
+
+#  Failover：主模型失败时自动切换（可选）
+#  fallbackModels:
+#    - qwen/qwen-plus
+
   systemPrompt: "你是 CrabCrush，一个友好的 AI 助手。请用中文回复。"
   maxTokens: 4096
 

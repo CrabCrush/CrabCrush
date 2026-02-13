@@ -4,6 +4,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyWebSocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
 import type { AgentRuntime } from '../agent/runtime.js';
+import { estimateCost } from '../models/pricing.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -111,9 +112,21 @@ export async function startGateway(options: GatewayOptions = {}) {
                 if (socket.readyState !== 1) break;
 
                 if (chunk.done) {
+                  // 计算费用估算
+                  let costInfo: { formatted: string } | null = null;
+                  if (chunk.usage && chunk.model) {
+                    costInfo = estimateCost(
+                      chunk.model,
+                      chunk.usage.promptTokens,
+                      chunk.usage.completionTokens,
+                    );
+                  }
+
                   socket.send(JSON.stringify({
                     type: 'done',
                     usage: chunk.usage,
+                    model: chunk.model,
+                    cost: costInfo?.formatted,
                   }));
                 } else {
                   socket.send(JSON.stringify({

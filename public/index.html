@@ -382,7 +382,9 @@
             cancelAnimationFrame(renderRAF);
             renderMarkdown(currentBotMsg, rawContent);
           }
-          if (msg.usage) showUsage(msg.usage);
+          if (msg.usage || msg.model || msg.cost) {
+            showUsage(msg.usage, msg.model, msg.cost);
+          }
           finishStreaming();
 
         } else if (msg.type === 'error') {
@@ -435,13 +437,20 @@
       }
     }
 
-    function showUsage(usage) {
-      if (!usage) return;
+    function showUsage(usage, model, cost) {
+      const parts = [];
+      if (model) parts.push(model);
+      if (usage) {
+        const prompt = usage.promptTokens ?? '?';
+        const completion = usage.completionTokens ?? '?';
+        parts.push(`tokens: ${prompt} → ${completion}`);
+      }
+      if (cost) parts.push(cost);
+      if (parts.length === 0) return;
+
       const el = document.createElement('div');
       el.className = 'usage';
-      const prompt = usage.promptTokens ?? '?';
-      const completion = usage.completionTokens ?? '?';
-      el.textContent = `tokens: ${prompt} → ${completion}`;
+      el.textContent = parts.join(' | ');
       messagesEl.appendChild(el);
     }
 

@@ -4,6 +4,7 @@ import { Command } from 'commander';
 import { loadConfig, findConfigPath } from './config/loader.js';
 import { KNOWN_PROVIDERS } from './config/schema.js';
 import { OpenAICompatibleProvider } from './models/provider.js';
+import { ModelRouter } from './models/router.js';
 import { AgentRuntime } from './agent/runtime.js';
 import { startGateway } from './gateway/server.js';
 import { DingTalkAdapter } from './channels/dingtalk.js';
@@ -28,38 +29,43 @@ program
     const config = loadConfig(options.config);
     const port = options.port ? parseInt(options.port, 10) : config.port;
 
-    // 查找第一个可用的模型提供商
+    // 初始化所有配置的模型提供商
     const entries = Object.entries(config.models);
     if (entries.length === 0) {
       printNoModelHelp();
       process.exit(1);
     }
 
-    const [providerId, providerConfig] = entries[0];
-    const baseURL = providerConfig.baseURL
-      ?? KNOWN_PROVIDERS[providerId]?.baseURL;
+    const providers = new Map<string, OpenAICompatibleProvider>();
+    for (const [providerId, providerConfig] of entries) {
+      const baseURL = providerConfig.baseURL ?? KNOWN_PROVIDERS[providerId]?.baseURL;
 
-    if (!baseURL) {
-      console.error(`❌ 模型 "${providerId}" 缺少 baseURL 配置。`);
-      console.error(`   已知提供商：${Object.keys(KNOWN_PROVIDERS).join(', ')}`);
-      console.error(`   自定义提供商需要在配置文件中指定 baseURL。\n`);
-      process.exit(1);
+      if (!baseURL) {
+        console.error(`❌ 模型 "${providerId}" 缺少 baseURL 配置。`);
+        console.error(`   已知提供商：${Object.keys(KNOWN_PROVIDERS).join(', ')}`);
+        console.error(`   自定义提供商需要在配置文件中指定 baseURL。\n`);
+        process.exit(1);
+      }
+
+      const defaultModel = providerConfig.defaultModel
+        ?? (providerId === 'deepseek' ? 'deepseek-chat' : undefined);
+
+      providers.set(
+        providerId,
+        new OpenAICompatibleProvider(providerId, baseURL, providerConfig.apiKey, defaultModel ?? providerId),
+      );
     }
 
-    const defaultModel = providerConfig.defaultModel ?? config.agent.model;
-    const providerName = KNOWN_PROVIDERS[providerId]?.name ?? providerId;
-
-    // 初始化模型
-    const provider = new OpenAICompatibleProvider(
-      providerId,
-      baseURL,
-      providerConfig.apiKey,
-      defaultModel,
+    // 创建模型路由器（自动匹配提供商 + Failover）
+    const router = new ModelRouter(
+      providers,
+      config.agent.model,
+      config.agent.fallbackModels,
     );
 
     // 初始化 Agent
     const agent = new AgentRuntime(
-      provider,
+      router,
       config.agent.systemPrompt,
       config.agent.maxTokens,
     );
@@ -84,8 +90,18 @@ program
     const host = config.bind === 'all' ? '0.0.0.0' : '127.0.0.1';
     const app = await startGateway({ port, bind: config.bind, agent });
 
+    const { providerName, modelName } = router.primaryInfo;
     console.log(`\n🦀 CrabCrush Gateway 已启动`);
-    console.log(`   模型: ${providerName} (${defaultModel})`);
+    console.log(`   模型: ${providerName} (${modelName})`);
+    if (router.hasFallback) {
+      console.log(`   Failover: ${router.modelChain.join(' → ')}`);
+    }
+    if (providers.size > 1) {
+      const names = [...providers.entries()].map(
+        ([id]) => KNOWN_PROVIDERS[id]?.name ?? id,
+      );
+      console.log(`   已加载提供商: ${names.join(', ')}`);
+    }
     console.log(`   WebChat: http://${host}:${port}`);
 
     // 启动渠道适配器

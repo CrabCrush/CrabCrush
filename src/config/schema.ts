@@ -4,26 +4,36 @@ import { z } from 'zod';
  * 已知模型提供商的默认配置
  * 用户只需提供 apiKey，baseURL 自动填充
  */
-export const KNOWN_PROVIDERS: Record<string, { baseURL: string; name: string }> = {
+export const KNOWN_PROVIDERS: Record<string, {
+  baseURL: string;
+  name: string;
+  /** 模型名前缀，用于 agent.model 自动匹配提供商 */
+  modelPrefixes?: string[];
+}> = {
   deepseek: {
     baseURL: 'https://api.deepseek.com/v1',
     name: 'DeepSeek',
+    modelPrefixes: ['deepseek'],
   },
   qwen: {
     baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     name: '通义千问',
+    modelPrefixes: ['qwen'],
   },
   kimi: {
     baseURL: 'https://api.moonshot.cn/v1',
     name: 'Kimi',
+    modelPrefixes: ['moonshot'],
   },
   glm: {
     baseURL: 'https://open.bigmodel.cn/api/paas/v4',
     name: '智谱 GLM',
+    modelPrefixes: ['glm', 'chatglm'],
   },
   doubao: {
     baseURL: 'https://ark.cn-beijing.volces.com/api/v3',
     name: '豆包',
+    modelPrefixes: ['doubao', 'ep-'],
   },
 };
 
@@ -56,10 +66,12 @@ export const configSchema = z.object({
 
   agent: z.object({
     model: z.string().default('deepseek-chat'),
+    fallbackModels: z.array(z.string()).default([]),
     systemPrompt: z.string().default('你是 CrabCrush，一个友好的 AI 助手。请用中文回复。'),
     maxTokens: z.number().int().default(4096),
   }).default({
     model: 'deepseek-chat',
+    fallbackModels: [],
     systemPrompt: '你是 CrabCrush，一个友好的 AI 助手。请用中文回复。',
     maxTokens: 4096,
   }),

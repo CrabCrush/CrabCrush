@@ -3,7 +3,8 @@
  * 管理会话、维护上下文、调用模型
  */
 
-import type { ChatMessage, ChatChunk, ChatOptions, OpenAICompatibleProvider } from '../models/provider.js';
+import type { ChatMessage, ChatChunk, ChatOptions } from '../models/provider.js';
+import type { ModelRouter } from '../models/router.js';
 
 export interface Session {
   id: string;
@@ -16,7 +17,7 @@ export class AgentRuntime {
   private sessions = new Map<string, Session>();
 
   constructor(
-    private provider: OpenAICompatibleProvider,
+    private router: ModelRouter,
     private systemPrompt: string,
     private maxTokens: number,
   ) {}
@@ -67,7 +68,7 @@ export class AgentRuntime {
 
     let fullContent = '';
     try {
-      for await (const chunk of this.provider.chat(messages, chatOptions)) {
+      for await (const chunk of this.router.chat(messages, chatOptions)) {
         fullContent += chunk.content;
         yield chunk;
       }

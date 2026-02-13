@@ -11,6 +11,8 @@ export interface ChatMessage {
 export interface ChatChunk {
   content: string;
   done: boolean;
+  /** 实际使用的模型名（仅在 done=true 的最终 chunk 中） */
+  model?: string;
   usage?: {
     promptTokens: number;
     completionTokens: number;
@@ -62,8 +64,8 @@ export class OpenAICompatibleProvider {
       throw new Error('模型 API 返回空响应');
     }
 
-    // 解析 SSE 流
-    yield* this.parseSSEStream(response.body, options.signal);
+    // 解析 SSE 流，传入模型名用于最终 chunk
+    yield* this.parseSSEStream(response.body, model, options.signal);
   }
 
   /**
@@ -150,6 +152,7 @@ export class OpenAICompatibleProvider {
    */
   private async *parseSSEStream(
     body: ReadableStream<Uint8Array>,
+    model: string,
     signal?: AbortSignal,
   ): AsyncIterable<ChatChunk> {
     const reader = body.getReader();
@@ -159,7 +162,7 @@ export class OpenAICompatibleProvider {
     try {
       while (true) {
         if (signal?.aborted) {
-          yield { content: '', done: true };
+          yield { content: '', done: true, model };
           return;
         }
 
@@ -176,7 +179,7 @@ export class OpenAICompatibleProvider {
 
           const data = trimmed.slice(6);
           if (data === '[DONE]') {
-            yield { content: '', done: true };
+            yield { content: '', done: true, model };
             return;
           }
 
@@ -194,6 +197,7 @@ export class OpenAICompatibleProvider {
               yield {
                 content: '',
                 done: true,
+                model,
                 usage: {
                   promptTokens: json.usage.prompt_tokens,
                   completionTokens: json.usage.completion_tokens,
@@ -211,7 +215,7 @@ export class OpenAICompatibleProvider {
       reader.releaseLock();
     }
 
-    yield { content: '', done: true };
+    yield { content: '', done: true, model };
   }
 
   /**

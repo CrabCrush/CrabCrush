@@ -4,12 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CrabCrush - AI 助手</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github-dark.min.css">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     :root {
       --bg: #0f0f1a;
       --surface: #1a1a2e;
-      --surface-hover: #222240;
       --primary: #e94560;
       --primary-dim: #c13550;
       --text: #e8e8e8;
@@ -17,37 +17,45 @@
       --user-bg: #0f3460;
       --bot-bg: #1e1e36;
       --border: #2a2a40;
-      --radius: 12px;
+      --code-bg: #161b22;
     }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+        'Microsoft YaHei', system-ui, sans-serif;
       background: var(--bg);
       color: var(--text);
       height: 100vh;
       display: flex;
       flex-direction: column;
     }
+
+    /* Header */
     header {
-      padding: 0.8rem 1rem;
+      padding: 0.7rem 1rem;
       background: var(--surface);
       border-bottom: 1px solid var(--border);
       display: flex;
       align-items: center;
       justify-content: center;
       gap: 0.5rem;
+      flex-shrink: 0;
     }
     header h1 { font-size: 1.1rem; font-weight: 600; }
-    header .logo { font-size: 1.3rem; }
-    header .subtitle { font-size: 0.75rem; color: var(--text-muted); }
+    .subtitle { font-size: 0.72rem; color: var(--text-muted); }
+
+    /* Status bar */
     #status {
       text-align: center;
-      padding: 0.35rem;
-      font-size: 0.75rem;
+      padding: 0.3rem;
+      font-size: 0.72rem;
       color: var(--text-muted);
       background: var(--surface);
+      flex-shrink: 0;
     }
     #status.connected { color: #4ade80; }
     #status.error { color: #f87171; }
+
+    /* Messages area */
     #messages {
       flex: 1;
       overflow-y: auto;
@@ -57,49 +65,151 @@
     #messages::-webkit-scrollbar { width: 6px; }
     #messages::-webkit-scrollbar-track { background: transparent; }
     #messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    /* Message bubbles */
     .message {
       max-width: 85%;
       margin-bottom: 0.75rem;
       padding: 0.7rem 1rem;
-      border-radius: var(--radius);
+      border-radius: 12px;
       line-height: 1.7;
-      white-space: pre-wrap;
       word-break: break-word;
       font-size: 0.95rem;
-      animation: fadeIn 0.2s ease;
+      animation: fadeIn 0.15s ease;
     }
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } }
     .message.user {
       background: var(--user-bg);
       margin-left: auto;
       border-bottom-right-radius: 4px;
+      white-space: pre-wrap;
     }
     .message.assistant {
       background: var(--bot-bg);
       border-bottom-left-radius: 4px;
     }
-    .message.assistant .cursor {
-      display: inline-block;
-      width: 2px;
-      height: 1em;
-      background: var(--primary);
-      margin-left: 2px;
-      vertical-align: text-bottom;
-      animation: blink 0.8s infinite;
-    }
-    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
     .message.error {
       background: #2d1b1b;
       color: #f87171;
       border: 1px solid #4a2020;
+      white-space: pre-wrap;
     }
+
+    /* Streaming cursor */
+    .streaming-cursor {
+      display: inline-block;
+      width: 2px; height: 1.1em;
+      background: var(--primary);
+      margin-left: 2px;
+      vertical-align: text-bottom;
+      animation: blink 0.7s infinite;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    /* Markdown content inside bot messages */
+    .message.assistant p { margin: 0.4em 0; }
+    .message.assistant p:first-child { margin-top: 0; }
+    .message.assistant p:last-child { margin-bottom: 0; }
+    .message.assistant ul, .message.assistant ol {
+      margin: 0.4em 0;
+      padding-left: 1.5em;
+    }
+    .message.assistant li { margin: 0.15em 0; }
+    .message.assistant blockquote {
+      border-left: 3px solid var(--primary);
+      padding-left: 0.8em;
+      margin: 0.5em 0;
+      color: var(--text-muted);
+    }
+    .message.assistant h1, .message.assistant h2,
+    .message.assistant h3, .message.assistant h4 {
+      margin: 0.6em 0 0.3em;
+      line-height: 1.3;
+    }
+    .message.assistant h1 { font-size: 1.3em; }
+    .message.assistant h2 { font-size: 1.15em; }
+    .message.assistant h3 { font-size: 1.05em; }
+    .message.assistant hr {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 0.8em 0;
+    }
+    .message.assistant a {
+      color: #60a5fa;
+      text-decoration: none;
+    }
+    .message.assistant a:hover { text-decoration: underline; }
+    .message.assistant strong { color: #fff; }
+    .message.assistant table {
+      border-collapse: collapse;
+      margin: 0.5em 0;
+      font-size: 0.9em;
+    }
+    .message.assistant th, .message.assistant td {
+      border: 1px solid var(--border);
+      padding: 0.35em 0.7em;
+    }
+    .message.assistant th {
+      background: var(--surface);
+      font-weight: 600;
+    }
+
+    /* Inline code */
+    .message.assistant code {
+      background: var(--code-bg);
+      padding: 0.15em 0.4em;
+      border-radius: 4px;
+      font-size: 0.88em;
+      font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', Consolas, monospace;
+    }
+
+    /* Code blocks */
+    .message.assistant pre {
+      background: var(--code-bg);
+      border-radius: 8px;
+      margin: 0.5em 0;
+      overflow-x: auto;
+      position: relative;
+    }
+    .message.assistant pre code {
+      display: block;
+      padding: 0.8em 1em;
+      background: transparent;
+      font-size: 0.85em;
+      line-height: 1.5;
+    }
+    .code-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.3em 0.8em;
+      background: #1c2333;
+      border-radius: 8px 8px 0 0;
+      font-size: 0.75em;
+      color: var(--text-muted);
+    }
+    .copy-btn {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      padding: 0.15em 0.5em;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.9em;
+    }
+    .copy-btn:hover { color: var(--text); border-color: var(--text-muted); }
+    .copy-btn.copied { color: #4ade80; border-color: #4ade80; }
+
+    /* Token usage */
     .usage {
       font-size: 0.7rem;
       color: var(--text-muted);
       text-align: right;
-      margin-top: 0.3rem;
+      margin-top: 0.2rem;
       margin-bottom: 0.5rem;
     }
+
+    /* Welcome screen */
     .welcome {
       text-align: center;
       padding: 3rem 1rem;
@@ -108,6 +218,8 @@
     .welcome .emoji { font-size: 3rem; margin-bottom: 0.5rem; }
     .welcome h2 { color: var(--text); margin-bottom: 0.5rem; font-size: 1.2rem; }
     .welcome p { font-size: 0.9rem; line-height: 1.6; }
+
+    /* Input area */
     #input-area {
       padding: 0.75rem 1rem;
       background: var(--surface);
@@ -115,6 +227,7 @@
       display: flex;
       gap: 0.5rem;
       align-items: flex-end;
+      flex-shrink: 0;
     }
     #input {
       flex: 1;
@@ -133,29 +246,38 @@
     }
     #input:focus { border-color: var(--primary); }
     #input::placeholder { color: var(--text-muted); }
-    #send {
+    #input:disabled { opacity: 0.5; }
+    .action-btn {
       padding: 0.65rem 1.2rem;
-      background: var(--primary);
       color: white;
       border: none;
       border-radius: 8px;
       cursor: pointer;
       font-size: 0.95rem;
       font-family: inherit;
-      transition: background 0.2s;
+      transition: background 0.2s, opacity 0.2s;
       white-space: nowrap;
+    }
+    #send {
+      background: var(--primary);
     }
     #send:hover { background: var(--primary-dim); }
     #send:disabled { opacity: 0.4; cursor: not-allowed; }
+    #stop-btn {
+      background: #dc2626;
+      display: none;
+    }
+    #stop-btn:hover { background: #b91c1c; }
+
     @media (max-width: 600px) {
-      .message { max-width: 92%; }
+      .message { max-width: 92%; font-size: 0.9rem; }
       #input-area { padding: 0.5rem; }
     }
   </style>
 </head>
 <body>
   <header>
-    <span class="logo">🦀</span>
+    <span style="font-size:1.3rem">🦀</span>
     <div>
       <h1>CrabCrush</h1>
       <div class="subtitle">你的私人 AI 助手</div>
@@ -171,21 +293,53 @@
   </div>
   <div id="input-area">
     <textarea id="input" placeholder="输入消息... (Enter 发送, Shift+Enter 换行)" rows="1"></textarea>
-    <button id="send" disabled>发送</button>
+    <button id="send" class="action-btn" disabled>发送</button>
+    <button id="stop-btn" class="action-btn">停止</button>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/markdown-it@14/dist/markdown-it.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11/highlight.min.js"></script>
   <script>
+    // ── Markdown 渲染器 ──
+    const md = window.markdownit({
+      html: false,
+      linkify: true,
+      typographer: true,
+      highlight(str, lang) {
+        if (lang && hljs.getLanguage(lang)) {
+          try { return hljs.highlight(str, { language: lang }).value; } catch {}
+        }
+        try { return hljs.highlightAuto(str).value; } catch {}
+        return '';
+      },
+    });
+
+    // 自定义 fence 渲染：添加语言标签和复制按钮
+    const defaultFence = md.renderer.rules.fence;
+    md.renderer.rules.fence = function(tokens, idx, options, env, self) {
+      const token = tokens[idx];
+      const lang = token.info.trim() || 'text';
+      const code = token.content;
+      const highlighted = options.highlight(code, lang) || md.utils.escapeHtml(code);
+      return `<div class="code-header"><span>${lang}</span><button class="copy-btn" onclick="copyCode(this)">复制</button></div><pre><code class="hljs language-${lang}">${highlighted}</code></pre>`;
+    };
+
+    // ── DOM 元素 ──
     const messagesEl = document.getElementById('messages');
     const inputEl = document.getElementById('input');
     const sendBtn = document.getElementById('send');
+    const stopBtn = document.getElementById('stop-btn');
     const statusEl = document.getElementById('status');
 
     let ws;
     let currentBotMsg = null;
+    let rawContent = '';          // 当前 bot 消息的原始文本
     let isStreaming = false;
     let sessionId = localStorage.getItem('crabcrush_session') || null;
     let welcomeShown = true;
+    let renderRAF = null;         // requestAnimationFrame ID，用于节流渲染
 
+    // ── WebSocket 连接 ──
     function connect() {
       const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
       ws = new WebSocket(`${protocol}//${location.host}/ws`);
@@ -193,19 +347,18 @@
       ws.onopen = () => {
         statusEl.textContent = '已连接';
         statusEl.className = 'connected';
-        sendBtn.disabled = false;
+        if (!isStreaming) sendBtn.disabled = false;
       };
 
       ws.onclose = () => {
-        statusEl.textContent = '连接断开，3 秒后重连...';
+        statusEl.textContent = '连接断开，3秒后重连...';
         statusEl.className = 'error';
         sendBtn.disabled = true;
-        isStreaming = false;
         setTimeout(connect, 3000);
       };
 
       ws.onerror = () => {
-        statusEl.textContent = '连接错误';
+        statusEl.textContent = '连接出错';
         statusEl.className = 'error';
       };
 
@@ -215,68 +368,80 @@
         if (msg.type === 'session') {
           sessionId = msg.sessionId;
           localStorage.setItem('crabcrush_session', sessionId);
+
         } else if (msg.type === 'chunk') {
           if (!currentBotMsg) {
             currentBotMsg = addMessage('assistant', '');
           }
-          // 移除旧光标，追加内容，添加新光标
-          removeCursor(currentBotMsg);
-          currentBotMsg.insertAdjacentText('beforeend', msg.content);
-          addCursor(currentBotMsg);
-          scrollToBottom();
+          rawContent += msg.content;
+          scheduleRender();
+
         } else if (msg.type === 'done') {
-          if (currentBotMsg) removeCursor(currentBotMsg);
-          if (msg.usage) {
-            showUsage(msg.usage);
+          // 最终渲染（确保完整内容正确显示）
+          if (currentBotMsg) {
+            cancelAnimationFrame(renderRAF);
+            renderMarkdown(currentBotMsg, rawContent);
           }
-          currentBotMsg = null;
-          isStreaming = false;
-          sendBtn.disabled = false;
-          inputEl.disabled = false;
-          inputEl.focus();
+          if (msg.usage) showUsage(msg.usage);
+          finishStreaming();
+
         } else if (msg.type === 'error') {
-          if (currentBotMsg) removeCursor(currentBotMsg);
-          addMessage('error', `❌ ${msg.message}`);
-          currentBotMsg = null;
-          isStreaming = false;
-          sendBtn.disabled = false;
-          inputEl.disabled = false;
-          inputEl.focus();
+          if (currentBotMsg) {
+            cancelAnimationFrame(renderRAF);
+            renderMarkdown(currentBotMsg, rawContent);
+          }
+          addMessage('error', `${msg.message}`);
+          finishStreaming();
         }
       };
     }
 
+    // ── 消息渲染 ──
     function addMessage(role, content) {
-      // 首条消息时清除欢迎语
       if (welcomeShown) {
-        const welcome = messagesEl.querySelector('.welcome');
-        if (welcome) welcome.remove();
+        const w = messagesEl.querySelector('.welcome');
+        if (w) w.remove();
         welcomeShown = false;
       }
-
       const el = document.createElement('div');
       el.className = `message ${role}`;
-      el.textContent = content;
+      if (role === 'user' || role === 'error') {
+        el.textContent = content;
+      }
       messagesEl.appendChild(el);
       scrollToBottom();
       return el;
     }
 
-    function addCursor(el) {
-      const cursor = document.createElement('span');
-      cursor.className = 'cursor';
-      el.appendChild(cursor);
+    /** 节流渲染：每个 animation frame 最多渲染一次 */
+    function scheduleRender() {
+      if (renderRAF) return;
+      renderRAF = requestAnimationFrame(() => {
+        renderRAF = null;
+        if (currentBotMsg) {
+          renderMarkdown(currentBotMsg, rawContent, true);
+          scrollToBottom();
+        }
+      });
     }
 
-    function removeCursor(el) {
-      const cursor = el.querySelector('.cursor');
-      if (cursor) cursor.remove();
+    /** 渲染 Markdown 到元素 */
+    function renderMarkdown(el, text, showCursor) {
+      el.innerHTML = md.render(text);
+      if (showCursor) {
+        const cursor = document.createElement('span');
+        cursor.className = 'streaming-cursor';
+        el.appendChild(cursor);
+      }
     }
 
     function showUsage(usage) {
+      if (!usage) return;
       const el = document.createElement('div');
       el.className = 'usage';
-      el.textContent = `tokens: ${usage.promptTokens ?? '?'} → ${usage.completionTokens ?? '?'}`;
+      const prompt = usage.promptTokens ?? '?';
+      const completion = usage.completionTokens ?? '?';
+      el.textContent = `tokens: ${prompt} → ${completion}`;
       messagesEl.appendChild(el);
     }
 
@@ -284,6 +449,7 @@
       messagesEl.scrollTop = messagesEl.scrollHeight;
     }
 
+    // ── 发送 / 停止 ──
     function send() {
       const content = inputEl.value.trim();
       if (!content || isStreaming || !ws || ws.readyState !== 1) return;
@@ -296,12 +462,53 @@
 
       inputEl.value = '';
       inputEl.style.height = 'auto';
+      startStreaming();
+    }
+
+    function stopGeneration() {
+      if (!isStreaming || !ws || ws.readyState !== 1) return;
+      ws.send(JSON.stringify({ type: 'stop' }));
+    }
+
+    function startStreaming() {
       isStreaming = true;
-      sendBtn.disabled = true;
+      rawContent = '';
+      currentBotMsg = null;
+      sendBtn.style.display = 'none';
+      stopBtn.style.display = '';
       inputEl.disabled = true;
     }
 
+    function finishStreaming() {
+      isStreaming = false;
+      rawContent = '';
+      currentBotMsg = null;
+      sendBtn.style.display = '';
+      stopBtn.style.display = 'none';
+      sendBtn.disabled = false;
+      inputEl.disabled = false;
+      inputEl.focus();
+    }
+
+    // ── 复制代码 ──
+    function copyCode(btn) {
+      const pre = btn.closest('.code-header').nextElementSibling;
+      const code = pre?.querySelector('code')?.textContent || '';
+      navigator.clipboard.writeText(code).then(() => {
+        btn.textContent = '已复制';
+        btn.classList.add('copied');
+        setTimeout(() => {
+          btn.textContent = '复制';
+          btn.classList.remove('copied');
+        }, 2000);
+      });
+    }
+    window.copyCode = copyCode;
+
+    // ── 事件绑定 ──
     sendBtn.addEventListener('click', send);
+    stopBtn.addEventListener('click', stopGeneration);
+
     inputEl.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
@@ -309,7 +516,6 @@
       }
     });
 
-    // 自动调整 textarea 高度
     inputEl.addEventListener('input', () => {
       inputEl.style.height = 'auto';
       inputEl.style.height = Math.min(inputEl.scrollHeight, 150) + 'px';

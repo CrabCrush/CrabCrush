@@ -39,6 +39,8 @@ program
 
     if (!baseURL) {
       console.error(`❌ 模型 "${providerId}" 缺少 baseURL 配置。`);
+      console.error(`   已知提供商：${Object.keys(KNOWN_PROVIDERS).join(', ')}`);
+      console.error(`   自定义提供商需要在配置文件中指定 baseURL。\n`);
       process.exit(1);
     }
 
@@ -61,14 +63,25 @@ program
     );
 
     // 启动 Gateway
-    await startGateway({ port, bind: config.bind, agent });
-
     const host = config.bind === 'all' ? '0.0.0.0' : '127.0.0.1';
+    const app = await startGateway({ port, bind: config.bind, agent });
+
     console.log(`\n🦀 CrabCrush Gateway 已启动`);
     console.log(`   模型: ${providerName} (${defaultModel})`);
     console.log(`   WebChat: http://${host}:${port}`);
     console.log(`   Health:  http://${host}:${port}/health`);
-    console.log(`   WebSocket: ws://${host}:${port}/ws\n`);
+    console.log(`\n   按 Ctrl+C 停止服务\n`);
+
+    // 优雅关闭
+    const shutdown = async () => {
+      console.log('\n🦀 正在关闭...');
+      await app.close();
+      console.log('🦀 已停止。再见！');
+      process.exit(0);
+    };
+
+    process.on('SIGINT', shutdown);
+    process.on('SIGTERM', shutdown);
   });
 
 program.parse();
@@ -83,5 +96,5 @@ function printNoModelHelp() {
   console.error('  models:');
   console.error('    deepseek:');
   console.error('      apiKey: sk-your-key\n');
-  console.error('  然后运行: crabcrush start\n');
+  console.error('  然后运行: pnpm dev\n');
 }

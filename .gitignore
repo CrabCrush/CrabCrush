@@ -19,6 +19,9 @@ Thumbs.db
 .env
 .env.local
 
+# Config file (contains API keys!)
+crabcrush.yaml
+
 # Logs
 *.log
 

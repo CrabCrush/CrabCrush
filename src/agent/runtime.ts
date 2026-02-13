@@ -3,7 +3,7 @@
  * 管理会话、维护上下文、调用模型
  */
 
-import type { ChatMessage, ChatChunk, OpenAICompatibleProvider } from '../models/provider.js';
+import type { ChatMessage, ChatChunk, ChatOptions, OpenAICompatibleProvider } from '../models/provider.js';
 
 export interface Session {
   id: string;
@@ -41,8 +41,13 @@ export class AgentRuntime {
 
   /**
    * 处理用户消息，流式返回模型回复
+   * @param signal - AbortSignal，用于中断生成
    */
-  async *chat(sessionId: string, userMessage: string): AsyncIterable<ChatChunk> {
+  async *chat(
+    sessionId: string,
+    userMessage: string,
+    signal?: AbortSignal,
+  ): AsyncIterable<ChatChunk> {
     const session = this.getOrCreateSession(sessionId);
 
     // 记录用户消息
@@ -55,12 +60,23 @@ export class AgentRuntime {
     ];
 
     // 调用模型
-    let fullContent = '';
-    for await (const chunk of this.provider.chat(messages, {
+    const chatOptions: ChatOptions = {
       maxTokens: this.maxTokens,
-    })) {
-      fullContent += chunk.content;
-      yield chunk;
+      signal,
+    };
+
+    let fullContent = '';
+    try {
+      for await (const chunk of this.provider.chat(messages, chatOptions)) {
+        fullContent += chunk.content;
+        yield chunk;
+      }
+    } catch (err) {
+      // 即使出错，也要保存已收到的部分回复
+      if (fullContent) {
+        session.messages.push({ role: 'assistant', content: fullContent });
+      }
+      throw err;
     }
 
     // 记录助手回复

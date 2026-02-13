@@ -22,7 +22,13 @@ export interface ChatOptions {
   model?: string;
   temperature?: number;
   maxTokens?: number;
+  signal?: AbortSignal;
 }
+
+/** 请求超时时间（毫秒） */
+const REQUEST_TIMEOUT_MS = 30_000;
+/** 超时后重试次数 */
+const MAX_RETRIES = 1;
 
 export class OpenAICompatibleProvider {
   constructor(
@@ -34,45 +40,129 @@ export class OpenAICompatibleProvider {
 
   /**
    * 流式对话
-   * 返回 AsyncIterable，逐块输出内容
+   * - 支持 AbortSignal（用于中断生成）
+   * - 自动超时（30s）
+   * - 失败自动重试 1 次（仅 5xx / 网络错误）
    */
   async *chat(messages: ChatMessage[], options: ChatOptions = {}): AsyncIterable<ChatChunk> {
     const model = options.model ?? this.defaultModel;
-
     const url = `${this.baseURL}/chat/completions`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages,
-        stream: true,
-        temperature: options.temperature ?? 0.7,
-        max_tokens: options.maxTokens ?? 4096,
-      }),
+    const body = JSON.stringify({
+      model,
+      messages,
+      stream: true,
+      temperature: options.temperature ?? 0.7,
+      max_tokens: options.maxTokens ?? 4096,
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(
-        `模型 API 调用失败 (${response.status}): ${errorText.slice(0, 200)}`,
-      );
-    }
+    // 带超时和重试的 fetch
+    const response = await this.fetchWithRetry(url, body, options.signal);
 
     if (!response.body) {
       throw new Error('模型 API 返回空响应');
     }
 
     // 解析 SSE 流
-    const reader = response.body.getReader();
+    yield* this.parseSSEStream(response.body, options.signal);
+  }
+
+  /**
+   * 带超时和重试的 fetch
+   * - 4xx 错误不重试（客户端问题）
+   * - 5xx / 网络错误重试 1 次
+   * - AbortSignal 触发时立即中断，不重试
+   */
+  private async fetchWithRetry(
+    url: string,
+    body: string,
+    externalSignal?: AbortSignal,
+  ): Promise<Response> {
+    let lastError: Error | undefined;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      // 组合外部 signal 和超时 signal
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+      // 监听外部 abort
+      const onExternalAbort = () => controller.abort();
+      externalSignal?.addEventListener('abort', onExternalAbort, { once: true });
+
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${this.apiKey}`,
+          },
+          body,
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeout);
+        externalSignal?.removeEventListener('abort', onExternalAbort);
+
+        if (response.ok) return response;
+
+        // 4xx — 客户端问题，不重试
+        if (response.status < 500) {
+          const errorText = await response.text();
+          const msg = this.formatApiError(response.status, errorText);
+          throw new Error(msg);
+        }
+
+        // 5xx — 服务端问题，可重试
+        const errorText = await response.text();
+        lastError = new Error(
+          `模型 API 服务端错误 (${response.status}): ${errorText.slice(0, 200)}`,
+        );
+      } catch (err) {
+        clearTimeout(timeout);
+        externalSignal?.removeEventListener('abort', onExternalAbort);
+
+        if (err instanceof Error) {
+          // 外部主动中断 — 不重试
+          if (externalSignal?.aborted) {
+            throw new Error('生成已中断');
+          }
+          // 超时
+          if (err.name === 'AbortError') {
+            lastError = new Error('模型响应超时（30秒无响应）');
+          } else {
+            lastError = err;
+          }
+        } else {
+          lastError = new Error(String(err));
+        }
+      }
+
+      // 重试前等 1 秒
+      if (attempt < MAX_RETRIES) {
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    }
+
+    throw lastError ?? new Error('模型调用失败');
+  }
+
+  /**
+   * 解析 SSE 流，逐块 yield ChatChunk
+   */
+  private async *parseSSEStream(
+    body: ReadableStream<Uint8Array>,
+    signal?: AbortSignal,
+  ): AsyncIterable<ChatChunk> {
+    const reader = body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
 
     try {
       while (true) {
+        if (signal?.aborted) {
+          yield { content: '', done: true };
+          return;
+        }
+
         const { done, value } = await reader.read();
         if (done) break;
 
@@ -84,7 +174,7 @@ export class OpenAICompatibleProvider {
           const trimmed = line.trim();
           if (!trimmed || !trimmed.startsWith('data: ')) continue;
 
-          const data = trimmed.slice(6); // 去掉 "data: " 前缀
+          const data = trimmed.slice(6);
           if (data === '[DONE]') {
             yield { content: '', done: true };
             return;
@@ -121,7 +211,22 @@ export class OpenAICompatibleProvider {
       reader.releaseLock();
     }
 
-    // 如果没有收到 [DONE]，也要结束
     yield { content: '', done: true };
+  }
+
+  /**
+   * 格式化 API 错误信息，给用户更清晰的提示
+   */
+  private formatApiError(status: number, body: string): string {
+    if (status === 401) {
+      return `API Key 无效或已过期。请检查 ${this.id} 的 API Key 配置。`;
+    }
+    if (status === 429) {
+      return '请求过于频繁，已被限流。请稍后再试。';
+    }
+    if (status === 402 || body.includes('insufficient')) {
+      return `${this.id} 账户余额不足。请充值后再试。`;
+    }
+    return `模型 API 调用失败 (${status}): ${body.slice(0, 200)}`;
   }
 }

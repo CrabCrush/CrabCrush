@@ -28,6 +28,18 @@ export function createGateway(options: GatewayOptions = {}): FastifyInstance {
     return { status: 'ok' };
   });
 
+  // 统一错误格式
+  app.setErrorHandler((err, _request, reply) => {
+    const error = err as Error & { statusCode?: number; code?: string };
+    const statusCode = error.statusCode ?? 500;
+    reply.status(statusCode).send({
+      error: {
+        code: error.code ?? 'INTERNAL_ERROR',
+        message: error.message,
+      },
+    });
+  });
+
   return app;
 }
 
@@ -49,6 +61,20 @@ export async function startGateway(options: GatewayOptions = {}) {
 
     app.get('/ws', { websocket: true }, (socket, _req) => {
       let sessionId = `webchat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      let currentAbort: AbortController | null = null;
+
+      // WebSocket ping/pong 保活
+      const pingInterval = setInterval(() => {
+        if (socket.readyState === 1) {
+          socket.ping();
+        }
+      }, 30_000);
+
+      socket.on('close', () => {
+        clearInterval(pingInterval);
+        // 连接关闭时中断进行中的生成
+        currentAbort?.abort();
+      });
 
       socket.on('message', async (raw: Buffer | string) => {
         try {
@@ -59,44 +85,77 @@ export async function startGateway(options: GatewayOptions = {}) {
             sessionId = msg.sessionId;
           }
 
+          // 中断生成
+          if (msg.type === 'stop') {
+            currentAbort?.abort();
+            currentAbort = null;
+            return;
+          }
+
           if (msg.type === 'chat' && msg.content) {
-            // 发送 sessionId 给客户端（首次连接时）
+            // 中断上一个进行中的请求（如果有）
+            currentAbort?.abort();
+
+            const abort = new AbortController();
+            currentAbort = abort;
+
+            // 发送 sessionId 给客户端
             socket.send(JSON.stringify({
               type: 'session',
               sessionId,
             }));
 
-            // 流式回复
-            for await (const chunk of agent.chat(sessionId, msg.content)) {
-              if (socket.readyState !== 1) break; // WebSocket 已关闭
+            try {
+              // 流式回复
+              for await (const chunk of agent.chat(sessionId, msg.content, abort.signal)) {
+                if (socket.readyState !== 1) break;
 
-              if (chunk.done) {
-                socket.send(JSON.stringify({
-                  type: 'done',
-                  usage: chunk.usage,
-                }));
-              } else {
-                socket.send(JSON.stringify({
-                  type: 'chunk',
-                  content: chunk.content,
-                }));
+                if (chunk.done) {
+                  socket.send(JSON.stringify({
+                    type: 'done',
+                    usage: chunk.usage,
+                  }));
+                } else {
+                  socket.send(JSON.stringify({
+                    type: 'chunk',
+                    content: chunk.content,
+                  }));
+                }
+              }
+            } catch (err) {
+              // 用户主动中断不算错误
+              if (abort.signal.aborted) {
+                socket.send(JSON.stringify({ type: 'done' }));
+                return;
+              }
+
+              const message = err instanceof Error ? err.message : '未知错误';
+              app.log.error({ err }, 'Chat 处理失败');
+              socket.send(JSON.stringify({
+                type: 'error',
+                message,
+              }));
+            } finally {
+              if (currentAbort === abort) {
+                currentAbort = null;
               }
             }
           }
         } catch (err) {
-          const message = err instanceof Error ? err.message : '未知错误';
-          app.log.error({ err }, 'WebSocket 消息处理失败');
-          socket.send(JSON.stringify({
-            type: 'error',
-            message,
-          }));
+          const message = err instanceof Error ? err.message : '消息格式错误';
+          app.log.error({ err }, 'WebSocket 消息解析失败');
+          if (socket.readyState === 1) {
+            socket.send(JSON.stringify({
+              type: 'error',
+              message,
+            }));
+          }
         }
       });
     });
   }
 
   // 静态文件服务（WebChat 前端）
-  // public/ 目录相对于项目根目录
   const publicDir = join(__dirname, '../../public');
   await app.register(fastifyStatic, {
     root: publicDir,

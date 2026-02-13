@@ -34,6 +34,19 @@ const modelProviderSchema = z.object({
   defaultModel: z.string().optional(),
 });
 
+// 渠道配置
+const dingtalkChannelSchema = z.object({
+  enabled: z.boolean().default(false),
+  clientId: z.string().optional(),
+  clientSecret: z.string().optional(),
+});
+
+const channelsSchema = z.object({
+  dingtalk: dingtalkChannelSchema.default({ enabled: false }),
+}).default({
+  dingtalk: { enabled: false },
+});
+
 // 主配置
 export const configSchema = z.object({
   port: z.number().int().min(1).max(65535).default(18790),
@@ -50,7 +63,10 @@ export const configSchema = z.object({
     systemPrompt: '你是 CrabCrush，一个友好的 AI 助手。请用中文回复。',
     maxTokens: 4096,
   }),
+
+  channels: channelsSchema,
 });
 
 export type CrabCrushConfig = z.infer<typeof configSchema>;
 export type ModelProviderConfig = z.infer<typeof modelProviderSchema>;
+export type DingTalkChannelConfig = z.infer<typeof dingtalkChannelSchema>;

@@ -71,5 +71,21 @@ export function loadConfig(configPath?: string): CrabCrushConfig {
     }
   }
 
+  // 钉钉渠道环境变量
+  if (process.env.CRABCRUSH_DINGTALK_CLIENT_ID || process.env.CRABCRUSH_DINGTALK_CLIENT_SECRET) {
+    if (!rawConfig.channels) rawConfig.channels = {};
+    if (!rawConfig.channels.dingtalk) rawConfig.channels.dingtalk = {};
+    const dt = rawConfig.channels.dingtalk;
+    if (process.env.CRABCRUSH_DINGTALK_CLIENT_ID) {
+      dt.clientId = process.env.CRABCRUSH_DINGTALK_CLIENT_ID;
+    }
+    if (process.env.CRABCRUSH_DINGTALK_CLIENT_SECRET) {
+      dt.clientSecret = process.env.CRABCRUSH_DINGTALK_CLIENT_SECRET;
+    }
+    if (dt.clientId && dt.clientSecret) {
+      dt.enabled = true;
+    }
+  }
+
   return configSchema.parse(rawConfig);
 }

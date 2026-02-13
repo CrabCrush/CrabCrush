@@ -6,6 +6,8 @@ import { KNOWN_PROVIDERS } from './config/schema.js';
 import { OpenAICompatibleProvider } from './models/provider.js';
 import { AgentRuntime } from './agent/runtime.js';
 import { startGateway } from './gateway/server.js';
+import { DingTalkAdapter } from './channels/dingtalk.js';
+import type { ChannelAdapter } from './channels/types.js';
 
 const program = new Command();
 
@@ -62,19 +64,52 @@ program
       config.agent.maxTokens,
     );
 
-    // 启动 Gateway
+    // 渠道适配器列表
+    const channels: ChannelAdapter[] = [];
+
+    // 钉钉渠道
+    const dt = config.channels.dingtalk;
+    if (dt.enabled && dt.clientId && dt.clientSecret) {
+      const dingtalk = new DingTalkAdapter({
+        clientId: dt.clientId,
+        clientSecret: dt.clientSecret,
+      });
+      dingtalk.setChatHandler((sessionId, content, signal) =>
+        agent.chat(sessionId, content, signal),
+      );
+      channels.push(dingtalk);
+    }
+
+    // 启动 Gateway（含 WebChat）
     const host = config.bind === 'all' ? '0.0.0.0' : '127.0.0.1';
     const app = await startGateway({ port, bind: config.bind, agent });
 
     console.log(`\n🦀 CrabCrush Gateway 已启动`);
     console.log(`   模型: ${providerName} (${defaultModel})`);
     console.log(`   WebChat: http://${host}:${port}`);
-    console.log(`   Health:  http://${host}:${port}/health`);
+
+    // 启动渠道适配器
+    for (const channel of channels) {
+      try {
+        await channel.start();
+        console.log(`   渠道: ${channel.type} ✅`);
+      } catch (err) {
+        console.error(`   渠道: ${channel.type} ❌ ${err instanceof Error ? err.message : err}`);
+      }
+    }
+
     console.log(`\n   按 Ctrl+C 停止服务\n`);
 
     // 优雅关闭
     const shutdown = async () => {
       console.log('\n🦀 正在关闭...');
+      // 先停渠道
+      for (const channel of channels) {
+        try {
+          await channel.stop();
+        } catch { /* ignore */ }
+      }
+      // 再停 Gateway
       await app.close();
       console.log('🦀 已停止。再见！');
       process.exit(0);

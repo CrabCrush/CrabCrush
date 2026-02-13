@@ -26,6 +26,20 @@ agent:
   systemPrompt: "你是 CrabCrush，一个友好的 AI 助手。请用中文回复。"
   maxTokens: 4096
 
-# 也可以通过环境变量配置 API Key：
-# export CRABCRUSH_DEEPSEEK_API_KEY=sk-xxx
-# export CRABCRUSH_QWEN_API_KEY=sk-xxx
+# 渠道配置
+channels:
+  # 钉钉机器人（Stream 模式，不需要公网 IP）
+  # 需要先在钉钉开放平台创建企业内部应用，获取 clientId 和 clientSecret
+  # 详见：https://opensource.dingtalk.com/developerpedia/docs/explore/tutorials/stream/bot
+  dingtalk:
+    enabled: false
+    clientId: your-dingtalk-client-id
+    clientSecret: your-dingtalk-client-secret
+
+# 也可以通过环境变量配置：
+# 模型 API Key：
+#   export CRABCRUSH_DEEPSEEK_API_KEY=sk-xxx
+#   export CRABCRUSH_QWEN_API_KEY=sk-xxx
+# 钉钉：
+#   export CRABCRUSH_DINGTALK_CLIENT_ID=xxx
+#   export CRABCRUSH_DINGTALK_CLIENT_SECRET=xxx

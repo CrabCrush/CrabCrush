@@ -84,10 +84,9 @@ crabcrush/
 ├── crabcrush.example.yaml # 配置示例
 ├── docs/                  # 项目文档
 │   ├── VISION.md          # 项目愿景与竞品分析
-│   ├── ARCHITECTURE.md    # 技术架构设计
+│   ├── ARCHITECTURE.md    # 技术架构 + 部署模式
 │   ├── ROADMAP.md         # 开发路线图
-│   ├── DECISIONS.md       # 决策记录
-│   └── DEPLOYMENT_MODES.md # 部署模式
+│   └── DECISIONS.md       # 决策记录
 ├── guide/                 # 使用指南
 │   └── dingtalk-setup.md  # 钉钉机器人接入指南
 ├── src/                   # 源代码
@@ -125,10 +124,9 @@ crabcrush/
 V1 只做 WebChat + 钉钉两个渠道、DeepSeek + 通义千问两个模型的**纯对话**（多轮上下文 + 流式输出）。
 不含工具调用、Skills 框架、语音、知识库等。完整的包含/不包含清单和成功标准见 DEC-011。
 
-## 部署模式（详见 DEC-010、docs/DEPLOYMENT_MODES.md）
+## 部署模式（详见 DEC-010、docs/ARCHITECTURE.md 第五章）
 
 本地模式（默认，零配置）+ 渠道模式（公网入口）。钉钉 Stream 模式不需要公网 IP，本地即可工作（DEC-003）。
-详细设计见 `docs/DEPLOYMENT_MODES.md`。
 
 ## 关键差异化能力
 
@@ -177,6 +175,5 @@ V1 只做 WebChat + 钉钉两个渠道、DeepSeek + 通义千问两个模型的*
 | `AGENTS.md`（本文件） | 项目全貌 + 当前进度 | **第一个读这个** |
 | `docs/DECISIONS.md` | 决策记录（21 条当前有效决策） | **第二个读这个** |
 | `docs/ROADMAP.md` | 路线图 + 每项任务的验收标准（DoD） | 想知道"下一步做什么" |
-| `docs/DEPLOYMENT_MODES.md` | 部署模式（本地模式 vs 渠道模式） | 想了解"怎么部署" |
-| `docs/ARCHITECTURE.md` | 技术架构、接口设计 | 想了解"怎么实现" |
+| `docs/ARCHITECTURE.md` | 技术架构 + 部署模式 | 想了解"怎么实现/怎么部署" |
 | `docs/VISION.md` | 愿景、竞品分析 | 想了解"为什么做这个" |

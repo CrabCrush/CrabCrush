@@ -8,6 +8,17 @@
 
 ### 2026-02-13
 
+#### docs: 文档整合 + "为什么不用 ChatGPT" + 本地持久化规划
+
+文档体系优化：减少文件数量，补充核心价值主张，规划数据持久化。
+
+- **README.md**：新增"为什么不直接用 ChatGPT？"对比表（费用、隐私、入口、定制、工具能力），解释"本地优先"的真正含义
+- **ROADMAP.md**：Phase 2a 新增 2a.1"本地对话持久化"（SQLite 存储、历史恢复、搜索、导出），解决当前会话仅在内存中的问题
+- **ARCHITECTURE.md**：合并 `DEPLOYMENT_MODES.md` 为第五章"部署模式"，文件数从 5 减到 4
+- **VISION.md**：3.3-3.5 远期能力（工具/语音/安全详细表格）精简为一段摘要 + ROADMAP 引用
+- **AGENTS.md**：更新目录结构和文档体系表（移除 DEPLOYMENT_MODES.md）
+- 删除 `docs/DEPLOYMENT_MODES.md`（内容已合并）
+
 #### docs: OpenClaw 深度对比 + Phase 2 策略调整
 
 与参考项目 OpenClaw 进行全面对比分析，提炼核心洞察并更新文档。

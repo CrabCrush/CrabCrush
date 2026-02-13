@@ -106,7 +106,7 @@
 - **渠道模式**：支持钉钉等外部渠道。公网入口方案：云服务器 / frp / ngrok / Tailscale Funnel
 - **重要：钉钉 Stream 模式不需要公网入口**（见 DEC-003），本地模式下也能接入钉钉
 - **设计原则**：Gateway 核心代码不区分模式，差异只在配置层
-- **详细设计**：见 `docs/DEPLOYMENT_MODES.md`
+- **详细设计**：见 `docs/ARCHITECTURE.md` 第五章"部署模式"
 
 ---
 

@@ -98,14 +98,14 @@ interface GatewayConfig {
 // 部署模式通过配置推断（不设显式 mode 字段）：
 // - 本地模式（默认）：bind = 'loopback'，publicUrl 未设置
 // - 渠道模式：publicUrl 已设置，bind 可选 'all'
-// 详见 docs/DEPLOYMENT_MODES.md
+// 详见本文件"五、部署模式"章节
 ```
 
 ### 2.2 Channel Layer（渠道层）
 
 每个渠道实现统一的 `ChannelAdapter` 接口。
 
-**重要：国内平台的消息接入有两种模式（详见 DEC-003、docs/DEPLOYMENT_MODES.md）：**
+**重要：国内平台的消息接入有两种模式（详见 DEC-003、本文件"五、部署模式"章节）：**
 
 1. **HTTP 回调（Webhook）模式**：平台 POST 到我们的公网 HTTP 端点，需要公网 IP / 域名
 2. **Stream / 长连接模式**：客户端主动连接平台服务器（类似 WebSocket），**不需要公网 IP**
@@ -503,37 +503,94 @@ interface RoutingStrategy {
 └─────────────────────────────────────────────────┘
 ```
 
-## 五、部署方案
+## 五、部署模式（原 DEPLOYMENT_MODES.md，已合并至此）
 
-### 方案 1：本地安装（推荐个人用户）
+> 详见 DEC-010。
+
+### 背景
+
+国内平台（钉钉/飞书/企微）的机器人消息传统上需要平台 POST 到**公网可达的 HTTP 端点**（Webhook 回调），
+这与"本地优先"理念存在张力。但 **Stream/长连接模式**（钉钉 Stream、飞书 WebSocket 订阅）改变了这一局面——
+客户端主动连接平台服务器，**不需要公网 IP**。这是 CrabCrush 部署架构的关键发现（详见 DEC-003）。
+
+### 模式一：本地模式（Local Mode）— 默认
+
+```
+用户浏览器 ──→ WebChat ──→ Gateway (localhost:18790)
+                                │
+                                ├─ Agent Runtime
+                                ├─ Model API (DeepSeek/Qwen/...)
+                                └─ 钉钉适配器 ──→ 主动连接钉钉 Stream 服务器
+                                                  （长连接，不需要公网 IP）
+```
+
+- **适用场景**：个人使用、开发调试、小团队
+- **支持的渠道**：WebChat（直连 localhost）、钉钉（Stream 模式）、飞书（WebSocket 模式，待评估）
+- **网络要求**：无需公网 IP、无需域名、无需证书。只需能访问外网 API
+- **配置难度**：零配置（WebChat）/ 低配置（钉钉需填 AppKey）
+
+**这是 V1 的主力模式。** `crabcrush start` 即可同时使用 WebChat 和钉钉。
+
+### 模式二：渠道模式（Channel Mode）— 需要公网入口
+
+```
+钉钉/飞书/企微平台
+     │ HTTP POST (webhook 回调)
+     ▼
+┌──────────────┐
+│  公网入口     │  ← 云服务器 / 内网穿透(frp/ngrok) / Tailscale Funnel
+└──────┬───────┘
+       ▼
+   Gateway (HTTP + WebSocket)
+       ├─ Agent Runtime
+       └─ Model API
+```
+
+- **适用场景**：使用 Webhook 回调模式的渠道（如企业微信）、企业正式部署
+- **网络要求**：需要公网可达的 HTTPS 端点
+
+| 公网入口方案 | 成本 | 稳定性 | 适合谁 |
+|------------|------|--------|--------|
+| 云服务器部署 | 月付 50-200 元 | 高 | 长期使用的团队 |
+| frp 内网穿透 | 需自建 frp 服务 | 中 | 有运维能力的用户 |
+| Tailscale Funnel | 免费 | 高 | 推荐 |
+| ngrok | 免费版有限制 | 中 | 快速测试 |
+
+### Gateway 模式推断
+
+Gateway 通过配置字段推断部署模式（不设显式 mode 字段）：
+
+- **`publicUrl` 未设置** → 本地模式（`bind` 默认 `loopback`，仅绑定 `127.0.0.1`）
+- **`publicUrl` 已设置** → 渠道模式（如 `https://crab.example.com`，支持 Webhook 回调）
+
+| 字段 | 本地模式 | 渠道模式 |
+|------|---------|---------|
+| `bind` | `loopback`（默认） | `loopback` 或 `all` |
+| `publicUrl` | 不设置 | 必须设置 |
+| `tls` | 不需要 | 可选（可用反向代理） |
+| `behindProxy` | 不需要 | 如用 nginx/caddy 设为 `true` |
+
+### Stream/长连接 = 关键架构优势
+
+| 渠道 | 长连接模式 | 说明 |
+|------|-----------|------|
+| 钉钉 | Stream 模式 | V1 已采用 |
+| 飞书 | WebSocket 事件订阅 v2.0 | Phase 2a 评估 |
+| 企业微信 | 无 | 仅 Webhook，必须渠道模式 |
+
+### 安装方式
 
 ```shell
+# 方案 1：本地安装（推荐个人用户）
 npm install -g crabcrush@latest
-crabcrush onboard           # 向导式配置
-crabcrush start             # 启动服务
-```
+crabcrush onboard && crabcrush start
 
-### 方案 2：Docker 部署（推荐服务器/团队）
+# 方案 2：Docker 部署（推荐服务器/团队）
+docker run -d --name crabcrush -p 18790:18790 -v ~/.crabcrush:/root/.crabcrush crabcrush/crabcrush:latest
 
-```shell
-docker run -d \
-  --name crabcrush \
-  -p 18790:18790 \
-  -v ~/.crabcrush:/root/.crabcrush \
-  crabcrush/crabcrush:latest
-```
-
-### 方案 3：一键脚本（面向非技术用户）
-
-```shell
+# 方案 3：一键脚本
 curl -fsSL https://get.crabcrush.dev | bash
 ```
-
-支持的部署平台：
-- 个人电脑（Windows/macOS/Linux）
-- 云服务器（阿里云/腾讯云/华为云）
-- NAS（群晖/威联通）
-- 宝塔面板（一键安装）
 
 ## 六、网络策略
 

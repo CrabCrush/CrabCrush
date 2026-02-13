@@ -113,27 +113,34 @@ Phase 0 (当前)   Phase 1        Phase 2a       Phase 2b       Phase 2c       P
 > 目标：从"能聊天"进化到"能干活"。工具能力优先于新渠道（详见 DEC-027）。
 > 核心逻辑：一个能帮你操作浏览器、查资料的钉钉机器人，比一个只能聊天的飞书机器人更有价值。
 
-### 2a.1 Function Calling + 安全沙箱（必须同步上线，详见 DEC-026）
+### 2a.1 本地对话持久化（兑现"本地优先"承诺）
+- [ ] SQLite 存储对话历史（`~/.crabcrush/data/conversations.db`）
+- [ ] Gateway 重启后恢复历史会话
+- [ ] WebChat 显示历史对话列表
+- [ ] 对话搜索（按关键词 / 时间范围）
+- [ ] 对话导出（JSON / Markdown）
+
+### 2a.2 Function Calling + 安全沙箱（必须同步上线，详见 DEC-026）
 - [ ] Function Calling 协议支持（基于模型能力探测）
 - [ ] 能力不足时的降级策略（不支持 tool_call → 提示词注入方式）
 - [ ] Owner 认证机制（只有 owner 能触发本地操作类工具）
 - [ ] 代码执行沙箱选型决策（Docker vs 隔离进程 vs worker_threads）
 
-### 2a.2 内置工具（按实用价值排序）
+### 2a.3 内置工具（按实用价值排序）
 - [ ] 浏览器控制（Playwright Core：搜索、截图、填表、抓取网页）
 - [ ] 文件操作（读写本地文件、文档解析）
 - [ ] 代码执行（沙箱内运行 Python/JS/Shell）
 - [ ] 网页搜索（百度/Google）
 
-### 2a.3 Skills 框架（借鉴 OpenClaw 的 SKILL.md 方式）
+### 2a.4 Skills 框架（借鉴 OpenClaw 的 SKILL.md 方式）
 - [ ] Skill 接口、加载器、生命周期管理（src/skills/）
 - [ ] 内置技能包：2-3 个示例技能
 - [ ] 用户自定义技能目录：~/.crabcrush/workspace/skills/
 
-### 2a.4 飞书渠道（工具就绪后再加）
+### 2a.5 飞书渠道（工具就绪后再加）
 - [ ] 飞书适配器（验证渠道抽象层复用度）
 
-### 2a.5 配置热加载（详见 DEC-018）
+### 2a.6 配置热加载（详见 DEC-018）
 - [ ] 配置文件变更检测
 - [ ] 运行时重新加载（不重启 Gateway）
 

@@ -1,6 +1,6 @@
 {
   "name": "crabcrush",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "CrabCrush - 你的私人 AI 助手 🦀",
   "type": "module",
   "main": "dist/index.js",

@@ -142,32 +142,26 @@ V1 只做 WebChat + 钉钉两个渠道、DeepSeek + 通义千问两个模型的*
 
 ## 当前阶段
 
-**项目处于 Phase 1（核心引擎）阶段** — 最后更新：2026-02-13
+**V1 已发布（v0.1.0）** — 最后更新：2026-02-13
 
-### 已完成
-- [x] 项目规划 + 决策记录（21 条，详见 docs/DECISIONS.md）
-- [x] 工程脚手架：pnpm + TypeScript strict + Fastify v5 + Commander.js + Zod + Vitest
+### V1 已完成
+- [x] 工程脚手架：pnpm + TypeScript strict + Fastify v5 + Commander.js + Zod + Vitest + ESLint + GitHub Actions CI
 - [x] 配置系统：YAML + 环境变量 + Zod 校验，5 个国产模型 baseURL 预置
 - [x] OpenAI 兼容模型适配器：SSE 流式、30s 超时、自动重试、AbortController 中断
+- [x] 模型路由器 + Failover + 费用估算
 - [x] Agent Runtime：会话管理 + 多轮上下文
-- [x] Gateway：HTTP + WebSocket + 静态文件 + 统一错误格式 + ping/pong + 优雅关闭
-- [x] WebChat：Markdown 渲染（markdown-it + highlight.js）、代码高亮+复制、停止生成
-- [x] 端到端验证：DeepSeek 单轮+多轮流式对话全链路通过
-- [x] 钉钉渠道：Stream 模式接入，@机器人收发消息，Markdown 自动检测，会话隔离
-- [x] 通义千问：纯配置接入（OpenAI 兼容适配器，不改代码）
-- [x] 使用文档：钉钉机器人接入指南（guide/dingtalk-setup.md）
+- [x] Gateway：HTTP + WebSocket + 静态文件 + 优雅关闭
+- [x] WebChat：Markdown 渲染 + 代码高亮 + 停止生成
+- [x] 钉钉渠道：Stream 模式 + Markdown 卡片 + 会话隔离
+- [x] CLI：`crabcrush start` / `onboard` / `doctor`
+- [x] 21 条决策记录 + 完整文档体系
 
-- [x] 模型路由器：agent.model 自动匹配提供商，支持 `providerId/modelName` 显式格式
-- [x] 模型 Failover：主模型失败自动切换备选（`agent.fallbackModels`）
-- [x] 费用估算：对话后显示模型名 + token 用量 + 估算费用
-- [x] 安全原则 DEC-026 + 产品定位 + CHANGELOG + 钉钉接入指南
-- [x] OpenClaw 深度对比分析 + Phase 2 策略调整（DEC-027：工具能力优先于新渠道）
-
-- [x] CLI 工具：`crabcrush onboard`（向导式配置）、`crabcrush doctor`（自检诊断）
-- [x] ESLint（flat config + @typescript-eslint）+ GitHub Actions CI（Node 20 + 22）
-
-### 下一步
-- [ ] V1 发布：整体验收 + 打 tag + push
+### 下一步（Phase 2a：让 CrabCrush "能干活"）
+- [ ] 本地对话持久化（SQLite）+ 上下文窗口管理
+- [ ] Function Calling + 安全沙箱
+- [ ] 内置工具（浏览器控制、文件操作）
+- [ ] Skills 框架
+- 详见 `docs/ROADMAP.md` Phase 2a
 
 ### 文档体系
 | 文件 | 作用 | 何时读 |

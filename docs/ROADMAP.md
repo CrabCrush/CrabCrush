@@ -75,10 +75,8 @@ Phase 0 (当前)   Phase 1        Phase 2a       Phase 2b       Phase 2c       P
 ### 1.1 钉钉渠道 — 企业内部应用机器人（详见 DEC-003）
 - [x] Stream 模式接入（优先，不需要公网入口）
   - DoD：本地启动 Gateway，钉钉群内 @机器人 → 收到回复，完整链路跑通
-- [ ] HTTP 回调模式（备选）
-  - DoD：配置 publicUrl 后，通过 webhook 回调方式同样能收发消息
-- [ ] 回调签名验证
-  - DoD：伪造的回调请求被拒绝（返回 401）
+- [ ] HTTP 回调模式（备选）→ 推迟到 Phase 2a.5（飞书/企微需要时再做）
+- [ ] 回调签名验证 → 推迟到 Phase 2a.5（依赖 HTTP 回调）
 - [x] 消息卡片（Markdown ActionCard）
   - DoD：长文本回复以 Markdown 卡片形式展示（自动检测 Markdown 特征）
 - [x] 验证渠道抽象层
@@ -89,8 +87,7 @@ Phase 0 (当前)   Phase 1        Phase 2a       Phase 2b       Phase 2c       P
 ### 1.2 模型层完善
 - [x] 模型路由器（自动匹配提供商 + 显式 `providerId/modelName` 格式）
   - DoD：`agent.model: qwen-max` 自动路由到 qwen 提供商，多提供商不再发错 API
-- [ ] 统一模型接口 + 能力探测（详见 DEC-009）
-  - DoD：ModelProvider 接口 + ModelCapabilities 定义完成，有单元测试
+- [ ] 统一模型接口 + 能力探测 → 推迟到 Phase 2a.2（工具调用需要能力探测，纯对话不需要）
 - [x] 通义千问接入（第二个模型）
   - DoD：通过修改配置文件（不改代码）切换到通义千问，对话正常
 - [x] 模型 Failover

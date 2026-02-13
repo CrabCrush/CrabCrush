@@ -4,7 +4,34 @@
 
 ---
 
-## [未发布]
+## [0.1.0] — 2026-02-13 (V1 Release)
+
+CrabCrush V1 正式发布。核心能力：WebChat + 钉钉双渠道纯对话，DeepSeek + 通义千问双模型，流式输出。
+
+### 核心功能
+- **WebChat**：浏览器聊天界面，Markdown 渲染 + 代码高亮 + 一键复制 + 停止生成
+- **钉钉渠道**：Stream 模式（不需要公网 IP），@机器人收发消息，Markdown 卡片，按用户隔离会话
+- **模型适配**：OpenAI 兼容适配器，支持 DeepSeek / 通义千问 / Kimi / GLM / 豆包
+- **模型路由**：自动匹配提供商 + 显式 `providerId/modelName` 格式
+- **模型 Failover**：主模型失败自动切换备选
+- **费用估算**：对话后显示模型名 + token 用量 + 估算费用（¥）
+- **CLI**：`crabcrush start`（启动）、`crabcrush onboard`（向导配置）、`crabcrush doctor`（自检诊断）
+- **配置**：YAML + 环境变量 + Zod 校验，已知提供商 baseURL 自动补全
+
+### 工程
+- TypeScript strict + Fastify v5 + Commander.js + Vitest
+- ESLint flat config + GitHub Actions CI（Node 20 + 22）
+- 24 个单元测试全部通过
+
+### 文档
+- 21 条决策记录（DEC-001 ~ DEC-027）
+- 钉钉机器人接入指南（guide/dingtalk-setup.md）
+- OpenClaw 深度对比分析 + Phase 2 策略（DEC-027：工具优先于新渠道）
+- README "为什么不直接用 ChatGPT" 对比表
+
+---
+
+## 开发过程记录
 
 ### 2026-02-13
 

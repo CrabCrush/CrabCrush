@@ -165,9 +165,10 @@ V1 只做 WebChat + 钉钉两个渠道、DeepSeek + 通义千问两个模型的*
 - [x] 安全原则 DEC-026 + 产品定位 + CHANGELOG + 钉钉接入指南
 
 - [x] CLI 工具：`crabcrush onboard`（向导式配置）、`crabcrush doctor`（自检诊断）
+- [x] ESLint（flat config + @typescript-eslint）+ GitHub Actions CI（Node 20 + 22）
 
 ### 下一步
-- [ ] Phase 1 收尾 → V1 发布（ESLint + CI/CD + 整体验收）
+- [ ] V1 发布：整体验收 + 打 tag + push
 
 ### 文档体系
 | 文件 | 作用 | 何时读 |

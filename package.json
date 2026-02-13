@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "tsx src/index.ts start",
     "build": "tsc",
+    "lint": "eslint src/ test/",
     "test": "vitest run",
     "start": "node dist/index.js start"
   },
@@ -35,8 +36,12 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.2",
     "@types/node": "^25.2.3",
     "@types/ws": "^8.18.1",
+    "@typescript-eslint/eslint-plugin": "^8.55.0",
+    "@typescript-eslint/parser": "^8.55.0",
+    "eslint": "^9.39.2",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18",

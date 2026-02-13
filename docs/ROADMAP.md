@@ -24,13 +24,13 @@ Phase 0 (当前)   Phase 1        Phase 2a       Phase 2b       Phase 2c       P
 - [x] git init + .gitignore（Node.js + TypeScript + IDE 配置）
 - [x] 初始化 pnpm 项目（单包结构，详见 DEC-002）
 - [x] TypeScript 配置（strict mode）
-- [ ] ESLint + Prettier 配置
+- [x] ESLint 配置（flat config，@typescript-eslint）
 - [x] Vitest 测试框架（至少一个示例测试通过）
 - [x] Fastify 基础服务骨架（详见 DEC-019）
 - [ ] Vue 3 + Vite 前端骨架（当前用单页 HTML，后续迁移，详见 DEC-020）
 - [x] Commander.js CLI 入口（详见 DEC-021）
 - [x] 配置加载（YAML + 环境变量 + Zod 校验，详见 DEC-022）
-- [ ] CI/CD 基础配置（GitHub Actions：lint + test + build）
+- [x] CI/CD 基础配置（GitHub Actions：lint + test + build，Node 20 + 22）
 - [x] 基础目录结构
 
 ### 0.3 最小可用原型（MVP）— 本地模式 ✅

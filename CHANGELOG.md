@@ -8,6 +8,14 @@
 
 ### 2026-02-13
 
+#### chore: ESLint + GitHub Actions CI
+
+V1 发布前的工程基建。
+
+- **ESLint**：flat config（ESLint 9 + @typescript-eslint），`pnpm lint` 零错误
+- **GitHub Actions CI**：push/PR 到 main 自动跑 lint → build → test，覆盖 Node 20 + 22
+- 新增 `pnpm lint` script
+
 #### feat: CLI tools - crabcrush onboard + doctor
 
 新用户引导和自检诊断。

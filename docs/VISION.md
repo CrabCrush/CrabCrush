@@ -46,11 +46,12 @@ CrabCrush 要解决的核心问题：**让中国用户也能拥有一个真正�
 | **Stars** | 189k+ | 从零开始 |
 
 **OpenClaw 值得学习的地方：**
-- Gateway 架构设计（WebSocket 控制面）非常优雅
-- Onboarding Wizard（向导式引导）体验极好
-- Skills 系统的插件化设计
-- Doctor 命令（自检诊断）的运维思路
-- 多会话隔离 + 安全沙箱
+- Gateway 架构设计（WebSocket 控制面）非常优雅 ✅ 已借鉴
+- Onboarding Wizard（向导式引导）体验极好 ✅ 已实现
+- Doctor 命令（自检诊断）的运维思路 ✅ 已实现
+- Skills 系统的 SKILL.md 插件化设计（Phase 2a 借鉴）
+- 多会话隔离 + Docker 安全沙箱（DEC-026 已规划）
+- "能干活"才是爆火核心——不是因为"能聊天"，而是浏览器控制、自动回邮件等工具能力
 
 **OpenClaw 不适合中国的地方：**
 - 渠道完全不匹配（国内没人用 WhatsApp/iMessage）
@@ -59,6 +60,20 @@ CrabCrush 要解决的核心问题：**让中国用户也能拥有一个真正�
 - 没有考虑 GFW 网络环境
 - 不支持中文语音服务
 - 没有国内常见的富交互（卡片消息、小程序等）
+
+**OpenClaw 的已知痛点（= CrabCrush 的机会）：**
+
+| 痛点 | OpenClaw | CrabCrush 优势 |
+|------|---------|---------------|
+| **API 成本高** | Claude Opus ~¥100+/百万 token，用户月均 ~¥1800 | DeepSeek ¥1-2/百万 token，**便宜 50-100 倍**；GLM-4-Flash 几乎免费 |
+| **部署复杂** | 需要 Docker + Python + WSL2（Windows），非程序员难以部署 | `pnpm install && pnpm dev`，一条命令启动 |
+| **需要公网 IP** | 多数渠道需要公网 IP / 反向代理 / Tailscale | 钉钉 Stream 模式不需要公网 IP，本地即可工作 |
+| **稳定性差** | 依赖 Claude API，网络波动导致任务失败 | 国产模型延迟低 + Failover 自动切换 |
+| **硬件绑定** | 推荐 Mac Mini M4 7×24 运行 | 任何有 Node.js 的设备都行 |
+
+**不应该学 OpenClaw 的地方：**
+- **原生 App**：OpenClaw 花大量精力做 macOS/iOS/Android App，CrabCrush 坚持"渠道即入口"，不需要额外 App
+- **大而全**：OpenClaw 9500+ commit、540 贡献者，代码量巨大。CrabCrush 保持精简，先做核心场景极致
 
 ### 2.2 其他竞品
 
@@ -182,14 +197,16 @@ CrabCrush 要解决的核心问题：**让中国用户也能拥有一个真正�
 
 ### 借鉴 vs 自研
 
-| 模块 | 策略 | 说明 |
-|------|------|------|
-| Gateway 架构 | 借鉴 OpenClaw 思路，自主实现 | WS 控制面是好设计 |
-| 渠道适配器 | 完全自研 | 国内渠道和国际渠道完全不同 |
-| 模型接口层 | 借鉴 + 自研 | 统一接口思路一样，但实现不同 |
-| Skills 系统 | 借鉴设计，自主实现 | 插件化架构通用 |
-| Web UI | 自研 | 更符合国内审美和交互习惯 |
-| CLI 工具 | 借鉴 | onboard/doctor 等命令是好实践 |
+| 模块 | 策略 | 说明 | 状态 |
+|------|------|------|------|
+| Gateway 架构 | 借鉴 OpenClaw 思路，自主实现 | WS 控制面是好设计 | V1 已完成 |
+| 渠道适配器 | 完全自研 | 国内渠道和国际渠道完全不同 | V1 已完成（WebChat + 钉钉） |
+| 模型接口层 | 借鉴 + 自研 | 统一接口 + 路由 + Failover + 费用估算 | V1 已完成 |
+| Skills 系统 | 借鉴 SKILL.md 设计，自主实现 | 插件化架构通用 | Phase 2a 待做 |
+| Web UI | 自研 | 更符合国内审美和交互习惯 | V1 基础版已完成 |
+| CLI 工具 | 借鉴 | onboard/doctor 等命令是好实践 | V1 已完成 |
+| 工具调用 | 借鉴思路，优先级提升 | 浏览器控制是最高价值工具（DEC-027） | Phase 2a 待做 |
+| 原生 App | 不做 | 坚持"渠道即入口"，不做 macOS/iOS App | 明确不做 |
 
 ---
 

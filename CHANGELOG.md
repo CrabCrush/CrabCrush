@@ -8,6 +8,15 @@
 
 ### 2026-02-13
 
+#### docs: OpenClaw 深度对比 + Phase 2 策略调整
+
+与参考项目 OpenClaw 进行全面对比分析，提炼核心洞察并更新文档。
+
+- **VISION.md**：补充 OpenClaw 痛点对比表（成本高 50-100 倍、部署复杂、需要公网 IP），明确"不应该学的"（原生 App、大而全），更新"借鉴 vs 自研"表格增加状态列
+- **ROADMAP.md**：Phase 2a 重构——从"工具调用与飞书接入"改为"工具调用（让 CrabCrush 能干活）"，优先级调整为：Function Calling > 浏览器控制 > Skills 框架 > 飞书渠道
+- **DECISIONS.md**：新增 DEC-027（Phase 2 策略：工具能力优先于新渠道）
+- **AGENTS.md**：决策数更新至 21 条，记录对比分析完成
+
 #### chore: ESLint + GitHub Actions CI
 
 V1 发布前的工程基建。

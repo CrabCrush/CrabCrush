@@ -79,7 +79,8 @@ program
       systemPrompt: config.agent.systemPrompt,
       maxTokens: config.agent.maxTokens,
       store,
-      contextWindow: config.agent.contextWindow, // 默认 40 条 = 20 轮，可在配置文件调整
+      contextWindow: config.agent.contextWindow,
+      debug: config.debug,
     });
 
     // 渠道适配器列表

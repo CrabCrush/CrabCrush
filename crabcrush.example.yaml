@@ -7,6 +7,9 @@ port: 18790
 # 绑定地址：loopback 仅本机访问，all 允许外部访问
 bind: loopback
 
+# 调试模式：打印发给模型的上下文摘要等详细日志（默认关闭）
+# debug: true
+
 # 认证配置
 auth:
   # WebChat 访问令牌（不设则每次启动自动生成随机令牌）

@@ -67,6 +67,8 @@ const authSchema = z.object({
 export const configSchema = z.object({
   port: z.number().int().min(1).max(65535).default(18790),
   bind: z.enum(['loopback', 'all']).default('loopback'),
+  /** 调试模式：打印发给模型的上下文摘要等详细日志 */
+  debug: z.boolean().default(false),
 
   auth: authSchema,
 

@@ -26,6 +26,8 @@ export interface AgentRuntimeOptions {
   store?: ConversationStore;
   /** 发给 API 的最大消息条数（默认 40 条 = 最近 20 轮） */
   contextWindow?: number;
+  /** 调试模式：打印发给模型的上下文摘要 */
+  debug?: boolean;
 }
 
 export class AgentRuntime {
@@ -35,13 +37,15 @@ export class AgentRuntime {
   private maxTokens: number;
   private store?: ConversationStore;
   private contextWindow: number;
+  private debug: boolean;
 
   constructor(options: AgentRuntimeOptions) {
     this.router = options.router;
     this.systemPrompt = options.systemPrompt;
     this.maxTokens = options.maxTokens;
     this.store = options.store;
-    this.contextWindow = options.contextWindow ?? 40; // 40 条 = 20 轮对话
+    this.contextWindow = options.contextWindow ?? 40;
+    this.debug = options.debug ?? false;
   }
 
   /**
@@ -94,6 +98,20 @@ export class AgentRuntime {
       { role: 'system', content: this.systemPrompt },
       ...recentMessages,
     ];
+
+    // 调试日志：显示发给模型的上下文摘要（需配置 debug: true）
+    if (this.debug) {
+      const historyCount = recentMessages.length;
+      const totalCount = session.messages.length;
+      console.log(
+        `[Context] 会话 ${sessionId.slice(0, 8)}... | ` +
+        `总消息 ${totalCount} 条, 发送 ${historyCount} 条 (窗口 ${this.contextWindow}) + system prompt`,
+      );
+      for (const m of recentMessages) {
+        const preview = m.content.length > 40 ? m.content.slice(0, 40) + '...' : m.content;
+        console.log(`  [${m.role}] ${preview}`);
+      }
+    }
 
     // 调用模型
     const chatOptions: ChatOptions = {

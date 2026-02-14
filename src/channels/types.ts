@@ -4,16 +4,18 @@
  */
 
 import type { ChatChunk } from '../models/provider.js';
+import type { ToolCallEvent } from '../agent/runtime.js';
 
 /**
  * 聊天处理函数
  * 对应 AgentRuntime.chat() 的签名
+ * 返回 ChatChunk（文本）或 ToolCallEvent（工具调用）
  */
 export type ChatHandler = (
   sessionId: string,
   content: string,
   signal?: AbortSignal,
-) => AsyncIterable<ChatChunk>;
+) => AsyncIterable<ChatChunk | ToolCallEvent>;
 
 /**
  * 渠道适配器基础接口

@@ -209,6 +209,22 @@
       margin-bottom: 0.5rem;
     }
 
+    /* Tool call display */
+    .tool-call {
+      margin: 0.5rem 1rem;
+      padding: 0.6rem 0.8rem;
+      background: rgba(99, 102, 241, 0.1);
+      border-left: 3px solid #6366f1;
+      border-radius: 0 6px 6px 0;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+    .tool-header { color: var(--text); margin-bottom: 0.3rem; }
+    .tool-header strong { color: #818cf8; }
+    .tool-args { margin-bottom: 0.2rem; }
+    .tool-args code { background: rgba(255,255,255,0.06); padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.85em; }
+    .tool-result { color: #a5b4fc; }
+
     /* Welcome screen */
     .welcome {
       text-align: center;
@@ -399,6 +415,19 @@
             }
             messagesEl.scrollTop = messagesEl.scrollHeight;
           }
+
+        } else if (msg.type === 'tool_call') {
+          // 工具调用事件 — 在聊天区域显示调用过程
+          const toolEl = document.createElement('div');
+          toolEl.className = 'tool-call';
+          const statusIcon = msg.success ? '✅' : '❌';
+          toolEl.innerHTML = `
+            <div class="tool-header">${statusIcon} 调用工具: <strong>${msg.name}</strong></div>
+            <div class="tool-args">参数: <code>${JSON.stringify(msg.args)}</code></div>
+            <div class="tool-result">结果: ${msg.result}</div>
+          `;
+          messagesEl.appendChild(toolEl);
+          messagesEl.scrollTop = messagesEl.scrollHeight;
 
         } else if (msg.type === 'chunk') {
           if (!currentBotMsg) {

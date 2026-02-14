@@ -3,8 +3,9 @@ import { dirname, join } from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyWebSocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
-import type { AgentRuntime } from '../agent/runtime.js';
+import type { AgentRuntime, ToolCallEvent } from '../agent/runtime.js';
 import { estimateCost } from '../models/pricing.js';
+import type { ChatChunk } from '../models/provider.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -134,10 +135,25 @@ export async function startGateway(options: GatewayOptions = {}) {
             }));
 
             try {
-              // 流式回复
-              for await (const chunk of agent.chat(sessionId, msg.content, abort.signal)) {
+              // 流式回复（支持 ChatChunk 和 ToolCallEvent 两种事件）
+              for await (const event of agent.chat(sessionId, msg.content, abort.signal)) {
                 if (socket.readyState !== 1) break;
 
+                // 工具调用事件
+                if ('type' in event && (event as ToolCallEvent).type === 'tool_call') {
+                  const toolEvent = event as ToolCallEvent;
+                  socket.send(JSON.stringify({
+                    type: 'tool_call',
+                    name: toolEvent.name,
+                    args: toolEvent.args,
+                    result: toolEvent.result,
+                    success: toolEvent.success,
+                  }));
+                  continue;
+                }
+
+                // 模型文本 chunk
+                const chunk = event as ChatChunk;
                 if (chunk.done) {
                   // 计算费用估算
                   let costInfo: { formatted: string } | null = null;

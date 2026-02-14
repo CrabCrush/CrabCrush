@@ -1,15 +1,18 @@
 /**
  * Agent Runtime
- * 管理会话、维护上下文、调用模型
+ * 管理会话、维护上下文、调用模型、执行工具调用
  *
  * Phase 2a 改造：
- * - 对话持久化到 SQLite（可选，不传 store 则退化为纯内存模式）
- * - 滑动窗口：只发最近 N 条消息给 API，不再全发
+ * - 对话持久化到 SQLite
+ * - 滑动窗口：只发最近 N 条消息给 API
+ * - Function Calling：模型请求 → 执行工具 → 返回结果 → 模型继续
  */
 
-import type { ChatMessage, ChatChunk, ChatOptions } from '../models/provider.js';
+import type { ChatMessage, ChatChunk, ChatOptions, ToolCall } from '../models/provider.js';
 import type { ModelRouter } from '../models/router.js';
 import type { ConversationStore } from '../storage/database.js';
+import type { ToolRegistry } from '../tools/registry.js';
+import type { ToolContext } from '../tools/types.js';
 
 export interface Session {
   id: string;
@@ -28,7 +31,23 @@ export interface AgentRuntimeOptions {
   contextWindow?: number;
   /** 调试模式：打印发给模型的上下文摘要 */
   debug?: boolean;
+  /** 工具注册中心 */
+  toolRegistry?: ToolRegistry;
+  /** Owner 用户 ID 列表（钉钉 userId / WebChat sessionId） */
+  ownerIds?: string[];
 }
+
+/** 工具调用事件 — 通过 yield 返回给调用方，用于 UI 展示 */
+export interface ToolCallEvent {
+  type: 'tool_call';
+  name: string;
+  args: Record<string, unknown>;
+  result: string;
+  success: boolean;
+}
+
+/** 最大工具调用轮次（防止无限循环） */
+const MAX_TOOL_ROUNDS = 5;
 
 export class AgentRuntime {
   private sessions = new Map<string, Session>();
@@ -38,6 +57,8 @@ export class AgentRuntime {
   private store?: ConversationStore;
   private contextWindow: number;
   private debug: boolean;
+  private toolRegistry?: ToolRegistry;
+  private ownerIds: Set<string>;
 
   constructor(options: AgentRuntimeOptions) {
     this.router = options.router;
@@ -46,16 +67,16 @@ export class AgentRuntime {
     this.store = options.store;
     this.contextWindow = options.contextWindow ?? 40;
     this.debug = options.debug ?? false;
+    this.toolRegistry = options.toolRegistry;
+    this.ownerIds = new Set(options.ownerIds ?? []);
   }
 
   /**
    * 获取或创建会话
-   * 如果有 SQLite 存储，从 DB 加载历史消息到内存
    */
   getOrCreateSession(sessionId: string, channel = 'webchat', senderId = ''): Session {
     let session = this.sessions.get(sessionId);
     if (!session) {
-      // 从 SQLite 加载历史（如果有的话）
       let messages: ChatMessage[] = [];
       if (this.store) {
         this.store.ensureConversation(sessionId, channel, senderId);
@@ -77,85 +98,181 @@ export class AgentRuntime {
 
   /**
    * 处理用户消息，流式返回模型回复
-   * @param signal - AbortSignal，用于中断生成
+   * 支持 Function Calling 循环：模型请求工具 → 执行 → 返回结果 → 模型继续
+   *
+   * yield 的类型：
+   * - ChatChunk: 模型的流式文本回复
+   * - ToolCallEvent: 工具调用事件（用于 UI 展示）
    */
   async *chat(
     sessionId: string,
     userMessage: string,
     signal?: AbortSignal,
-  ): AsyncIterable<ChatChunk> {
+    senderId?: string,
+  ): AsyncIterable<ChatChunk | ToolCallEvent> {
     const session = this.getOrCreateSession(sessionId);
 
     // 记录用户消息
     session.messages.push({ role: 'user', content: userMessage });
     this.store?.saveMessage(sessionId, 'user', userMessage);
 
-    // 滑动窗口：只取最近 N 条消息发给 API
-    const recentMessages = session.messages.slice(-this.contextWindow);
+    // 工具调用循环
+    let toolRound = 0;
 
-    // 构建完整的消息列表（系统提示 + 精选历史）
-    const messages: ChatMessage[] = [
-      { role: 'system', content: this.systemPrompt },
-      ...recentMessages,
-    ];
+    while (toolRound <= MAX_TOOL_ROUNDS) {
+      // 滑动窗口
+      const recentMessages = session.messages.slice(-this.contextWindow);
 
-    // 调试日志：显示发给模型的上下文摘要（需配置 debug: true）
-    if (this.debug) {
-      const historyCount = recentMessages.length;
-      const totalCount = session.messages.length;
-      console.log(
-        `[Context] 会话 ${sessionId.slice(0, 8)}... | ` +
-        `总消息 ${totalCount} 条, 发送 ${historyCount} 条 (窗口 ${this.contextWindow}) + system prompt`,
-      );
-      for (const m of recentMessages) {
-        const preview = m.content.length > 40 ? m.content.slice(0, 40) + '...' : m.content;
-        console.log(`  [${m.role}] ${preview}`);
+      const messages: ChatMessage[] = [
+        { role: 'system', content: this.systemPrompt },
+        ...recentMessages,
+      ];
+
+      // 调试日志
+      if (this.debug) {
+        const historyCount = recentMessages.length;
+        const totalCount = session.messages.length;
+        console.log(
+          `[Context] 会话 ${sessionId.slice(0, 8)}... | ` +
+          `总消息 ${totalCount} 条, 发送 ${historyCount} 条 (窗口 ${this.contextWindow})` +
+          (toolRound > 0 ? ` | 工具调用第 ${toolRound} 轮` : ''),
+        );
+        for (const m of recentMessages) {
+          const preview = m.content.length > 40 ? m.content.slice(0, 40) + '...' : m.content;
+          console.log(`  [${m.role}] ${preview}`);
+        }
       }
+
+      // 构建 chatOptions（带工具定义）
+      const isOwner = this.isOwner(senderId);
+      const chatOptions: ChatOptions = {
+        maxTokens: this.maxTokens,
+        signal,
+      };
+
+      // 如果有注册的工具，传给模型
+      if (this.toolRegistry && this.toolRegistry.size > 0) {
+        chatOptions.tools = this.toolRegistry.getDefinitionsForModel(isOwner);
+      }
+
+      // 调用模型
+      let fullContent = '';
+      let toolCalls: ToolCall[] | undefined;
+
+      try {
+        for await (const chunk of this.router.chat(messages, chatOptions)) {
+          if (chunk.toolCalls) {
+            toolCalls = chunk.toolCalls;
+          }
+          if (chunk.content) {
+            fullContent += chunk.content;
+          }
+          // 只 yield ChatChunk 类型（文本内容）
+          yield chunk;
+        }
+      } catch (err) {
+        if (fullContent) {
+          session.messages.push({ role: 'assistant', content: fullContent });
+          this.store?.saveMessage(sessionId, 'assistant', fullContent);
+        }
+        throw err;
+      }
+
+      // 情况 1: 模型返回了纯文本回复（没有工具调用），正常结束
+      if (!toolCalls || toolCalls.length === 0) {
+        if (fullContent) {
+          session.messages.push({ role: 'assistant', content: fullContent });
+          this.store?.saveMessage(sessionId, 'assistant', fullContent);
+        }
+        break;
+      }
+
+      // 情况 2: 模型请求了工具调用
+      toolRound++;
+
+      if (this.debug) {
+        console.log(`[Tools] 模型请求 ${toolCalls.length} 个工具调用:`);
+        for (const tc of toolCalls) {
+          console.log(`  → ${tc.function.name}(${tc.function.arguments})`);
+        }
+      }
+
+      // 先记录 assistant 的工具调用消息
+      const assistantMsg: ChatMessage = {
+        role: 'assistant',
+        content: fullContent,
+        tool_calls: toolCalls,
+      };
+      session.messages.push(assistantMsg);
+
+      // 逐个执行工具
+      const toolContext: ToolContext = {
+        senderId: senderId ?? sessionId,
+        isOwner,
+        sessionId,
+      };
+
+      for (const tc of toolCalls) {
+        let args: Record<string, unknown> = {};
+        try {
+          args = JSON.parse(tc.function.arguments);
+        } catch {
+          // 模型返回的参数格式不正确
+        }
+
+        const result = this.toolRegistry
+          ? await this.toolRegistry.execute(tc.function.name, args, toolContext)
+          : { success: false, content: '工具系统未启用' };
+
+        if (this.debug) {
+          console.log(`  ← ${tc.function.name}: ${result.success ? '✓' : '✗'} ${result.content.slice(0, 100)}`);
+        }
+
+        // yield 工具调用事件给 UI
+        yield {
+          type: 'tool_call' as const,
+          name: tc.function.name,
+          args,
+          result: result.content,
+          success: result.success,
+        };
+
+        // 把工具结果加入消息历史，供下一轮模型调用
+        const toolMsg: ChatMessage = {
+          role: 'tool',
+          content: result.content,
+          tool_call_id: tc.id,
+        };
+        session.messages.push(toolMsg);
+      }
+
+      // 继续循环，让模型根据工具结果生成最终回复
     }
 
-    // 调用模型
-    const chatOptions: ChatOptions = {
-      maxTokens: this.maxTokens,
-      signal,
-    };
-
-    let fullContent = '';
-    try {
-      for await (const chunk of this.router.chat(messages, chatOptions)) {
-        fullContent += chunk.content;
-        yield chunk;
-      }
-    } catch (err) {
-      // 即使出错，也要保存已收到的部分回复
-      if (fullContent) {
-        session.messages.push({ role: 'assistant', content: fullContent });
-        this.store?.saveMessage(sessionId, 'assistant', fullContent);
-      }
-      throw err;
-    }
-
-    // 记录助手回复
-    if (fullContent) {
-      session.messages.push({ role: 'assistant', content: fullContent });
-      this.store?.saveMessage(sessionId, 'assistant', fullContent);
-    }
-
-    // 内存中也保持滑动窗口大小，防止内存无限增长
+    // 内存中保持滑动窗口
     if (session.messages.length > this.contextWindow * 2) {
       session.messages = session.messages.slice(-this.contextWindow);
     }
   }
 
   /**
+   * 判断发送者是否是 owner
+   */
+  private isOwner(senderId?: string): boolean {
+    if (!senderId) return false;
+    // 如果没配 ownerIds，默认所有人都是 owner（单用户场景）
+    if (this.ownerIds.size === 0) return true;
+    return this.ownerIds.has(senderId);
+  }
+
+  /**
    * 获取会话的历史消息（用于 WebChat 加载历史）
    */
   getHistory(sessionId: string): ChatMessage[] {
-    // 优先从 SQLite 获取完整历史
     if (this.store) {
       const stored = this.store.getRecentMessages(sessionId, this.contextWindow);
       return stored.map(m => ({ role: m.role as ChatMessage['role'], content: m.content }));
     }
-    // 退化为内存中的消息
     const session = this.sessions.get(sessionId);
     return session?.messages ?? [];
   }

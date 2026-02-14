@@ -8,6 +8,19 @@
 
 ### 2026-02-14
 
+#### feat: Function Calling + 工具系统（Phase 2a.2）
+
+CrabCrush 从"能聊天"进化到"能干活"。
+
+- **工具类型系统**（`src/tools/types.ts`）：基于 OpenAI Function Calling 标准格式（DEC-029）
+- **工具注册中心**（`src/tools/registry.ts`）：注册、查找、权限过滤、安全执行
+- **模型层改造**（`src/models/provider.ts`）：支持 `tools` 参数和 `tool_calls` 流式响应解析
+- **Agent 工具执行循环**：模型请求工具 → 执行 → 返回结果 → 模型继续回复（最多 5 轮）
+- **Owner 认证**（DEC-026）：`ownerIds` 配置，未配置时默认所有人是 owner（个人使用），配置后仅 owner 可触发本地操作类工具
+- **内置工具 `get_current_time`**：让 AI 知道当前时间（public 权限，验证端到端流程）
+- **WebChat 工具调用 UI**：紫色卡片展示调用过程（工具名、参数、结果）
+- 新增 11 个工具系统测试（总计 44 个）
+
 #### feat: SQLite 对话持久化 + 滑动窗口（Phase 2a.1）
 
 对话历史不再重启即丢，兑现"本地优先"承诺。

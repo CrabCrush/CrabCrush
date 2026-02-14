@@ -89,6 +89,9 @@ export const configSchema = z.object({
     contextWindow: 40,
   }),
 
+  /** Owner 用户 ID（只有 owner 能触发本地操作类工具，详见 DEC-026） */
+  ownerIds: z.array(z.string()).default([]),
+
   channels: channelsSchema,
 });
 

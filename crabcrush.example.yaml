@@ -45,6 +45,13 @@ agent:
   # 越大记忆越长，但 token 消耗越多（= 越贵）
   # contextWindow: 40
 
+# Owner 用户 ID（只有 owner 能触发本地操作类工具）
+# 不配置时默认所有用户都是 owner（适合个人使用）
+# 放到群聊时建议配置，防止其他人操控你的电脑
+# ownerIds:
+#   - "钉钉userId"
+#   - "飞书openId"
+
 # 渠道配置
 channels:
   # 钉钉机器人（Stream 模式，不需要公网 IP）

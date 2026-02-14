@@ -100,10 +100,13 @@ export class DingTalkAdapter implements ChannelAdapter {
         `[钉钉] ${payload.senderNick}(${payload.senderStaffId}): ${content.length > 50 ? content.slice(0, 50) + '...' : content}`,
       );
 
-      // 调用 Agent 获取回复（收集全部 chunks）
+      // 调用 Agent 获取回复（收集全部 chunks，跳过工具调用事件）
       let fullContent = '';
       try {
-        for await (const chunk of this.chatHandler(sessionId, content)) {
+        for await (const event of this.chatHandler(sessionId, content)) {
+          // 跳过 ToolCallEvent，只收集文本内容
+          if ('type' in event && (event as { type: string }).type === 'tool_call') continue;
+          const chunk = event as { content: string };
           fullContent += chunk.content;
         }
       } catch (err) {

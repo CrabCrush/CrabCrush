@@ -10,6 +10,8 @@ import { OpenAICompatibleProvider } from './models/provider.js';
 import { ModelRouter } from './models/router.js';
 import { AgentRuntime } from './agent/runtime.js';
 import { ConversationStore } from './storage/database.js';
+import { ToolRegistry } from './tools/registry.js';
+import { builtinTools } from './tools/builtin/index.js';
 import { startGateway } from './gateway/server.js';
 import { DingTalkAdapter } from './channels/dingtalk.js';
 import { runDoctor } from './cli/doctor.js';
@@ -73,7 +75,13 @@ program
     const dbPath = join(homedir(), '.crabcrush', 'data', 'conversations.db');
     const store = new ConversationStore(dbPath);
 
-    // 初始化 Agent（带持久化 + 滑动窗口）
+    // 初始化工具系统
+    const toolRegistry = new ToolRegistry();
+    for (const tool of builtinTools) {
+      toolRegistry.register(tool);
+    }
+
+    // 初始化 Agent（带持久化 + 滑动窗口 + 工具调用）
     const agent = new AgentRuntime({
       router,
       systemPrompt: config.agent.systemPrompt,
@@ -81,6 +89,8 @@ program
       store,
       contextWindow: config.agent.contextWindow,
       debug: config.debug,
+      toolRegistry,
+      ownerIds: config.ownerIds,
     });
 
     // 渠道适配器列表
@@ -117,6 +127,9 @@ program
         ([id]) => KNOWN_PROVIDERS[id]?.name ?? id,
       );
       console.log(`   已加载提供商: ${names.join(', ')}`);
+    }
+    if (toolRegistry.size > 0) {
+      console.log(`   工具: ${toolRegistry.names.join(', ')} (${toolRegistry.size} 个)`);
     }
     console.log(`   WebChat: http://${host}:${port}/?token=${token}`);
     if (!config.auth?.token) {

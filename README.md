@@ -94,6 +94,8 @@ pnpm dev
 打开浏览器访问 **http://127.0.0.1:18790**，即可与 AI 对话。
 
 > 想接入钉钉？查看 [钉钉机器人接入指南](./guide/dingtalk-setup.md)（Stream 模式，不需要公网 IP）
+>
+> 想用网页抓取（让 AI 总结链接内容）？首次使用需执行 `npx playwright install chromium`
 
 ---
 

@@ -8,6 +8,15 @@
 
 ### 2026-02-14
 
+#### feat: 内置工具 browse_url（Phase 2a.3 浏览器控制）
+
+AI 可以抓取网页内容，回答「这个链接讲了什么」「帮我总结这个页面」等问题。
+
+- **browse_url**：打开 URL，提取标题和正文，返回给模型（默认截断 8000 字符）
+- 权限：owner（操作本地浏览器，DEC-026）
+- 依赖：Playwright + Chromium，首次使用需执行 `npx playwright install chromium`
+- 超时：15 秒
+
 #### fix: 文档同步 + senderId 传递（查缺补漏）
 
 - **AGENTS.md**：更新当前阶段（Phase 2a 已完成项）、下一步、目录结构（含 storage/tools/cli/router/pricing）

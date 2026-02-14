@@ -169,16 +169,17 @@ DEC-011 定义 V1 不含工具调用；V1 发布后 Phase 2a 已部分实现（�
 - [x] WebChat：Markdown 渲染 + 代码高亮 + 停止生成
 - [x] 钉钉渠道：Stream 模式 + Markdown 卡片 + 会话隔离
 - [x] CLI：`crabcrush start` / `onboard` / `doctor`
-- [x] 23 条决策记录 + 完整文档体系
+- [x] 24 条决策记录 + 完整文档体系
 
 ### Phase 2a 已完成（部分）
 - [x] WebChat Token 认证（2a.0）
 - [x] SQLite 对话持久化 + 滑动窗口（2a.1）
 - [x] Function Calling + Owner 认证（2a.2）
 - [x] 内置工具 `get_current_time`（2a.2 验证）
+- [x] 内置工具 `browse_url`（2a.3 抓取网页内容）
 
 ### 下一步（Phase 2a 续）
-- [ ] 内置工具：浏览器控制、文件操作、数据库查询（2a.3）
+- [ ] 内置工具：浏览器截图/填表、文件操作、数据库查询（2a.3）
 - [ ] Skills 框架（2a.4）
 - [ ] 飞书渠道（2a.5）
 - 详见 `docs/ROADMAP.md` Phase 2a
@@ -187,7 +188,7 @@ DEC-011 定义 V1 不含工具调用；V1 发布后 Phase 2a 已部分实现（�
 | 文件 | 作用 | 何时读 |
 |------|------|--------|
 | `AGENTS.md`（本文件） | 项目全貌 + 当前进度 | **第一个读这个** |
-| `docs/DECISIONS.md` | 决策记录（23 条当前有效决策） | **第二个读这个** |
+| `docs/DECISIONS.md` | 决策记录（24 条当前有效决策） | **第二个读这个** |
 | `docs/ROADMAP.md` | 路线图 + 每项任务的验收标准（DoD） | 想知道"下一步做什么" |
 | `docs/ARCHITECTURE.md` | 技术架构 + 部署模式 | 想了解"怎么实现/怎么部署" |
 | `docs/VISION.md` | 愿景、竞品分析 | 想了解"为什么做这个" |

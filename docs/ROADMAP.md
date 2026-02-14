@@ -136,8 +136,10 @@ Phase 0 (当前)   Phase 1        Phase 2a       Phase 2b       Phase 2c       P
 - [ ] 数据安全防线（DEC-028）：工具结果脱敏、列白名单、确认机制
 
 ### 2a.3 内置工具（按实用价值排序）
-- [ ] 浏览器控制（Playwright Core：搜索、截图、填表、抓取网页）
+- [x] 浏览器控制（Playwright Core：抓取网页内容 `browse_url`）
+- [ ] 浏览器控制（续）：截图、填表、搜索
 - [ ] 文件操作（读写本地文件、文档解析）
+  - **设计时必读**：DEC-030 — 文件单独存、消息存引用；大内容不塞进 `messages.content`；可选的消息长度限制与自动清理
 - [ ] 数据库查询（MySQL/PostgreSQL/SQLite，默认只读，列白名单）
 - [ ] 代码执行（沙箱内运行 Python/JS/Shell）
 - [ ] 网页搜索（百度/Google）

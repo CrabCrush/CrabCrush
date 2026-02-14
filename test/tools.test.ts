@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { ToolRegistry } from '../src/tools/registry.js';
 import { getCurrentTimeTool } from '../src/tools/builtin/time.js';
+import { browseUrlTool } from '../src/tools/builtin/browser.js';
 import type { Tool, ToolContext, ToolResult } from '../src/tools/types.js';
 
 // 创建测试用的 mock 工具
@@ -134,4 +135,34 @@ describe('get_current_time tool', () => {
     expect(getCurrentTimeTool.permission).toBe('public');
     expect(getCurrentTimeTool.confirmRequired).toBe(false);
   });
+});
+
+describe('browse_url tool', () => {
+  it('rejects missing url', async () => {
+    const ctx: ToolContext = { senderId: 'owner-1', isOwner: true, sessionId: 'sess-1' };
+    const result = await browseUrlTool.execute({}, ctx);
+    expect(result.success).toBe(false);
+    expect(result.content).toContain('url');
+  });
+
+  it('rejects url without http/https', async () => {
+    const ctx: ToolContext = { senderId: 'owner-1', isOwner: true, sessionId: 'sess-1' };
+    const result = await browseUrlTool.execute({ url: 'ftp://example.com' }, ctx);
+    expect(result.success).toBe(false);
+    expect(result.content).toContain('http');
+  });
+
+  it('is an owner tool', () => {
+    expect(browseUrlTool.permission).toBe('owner');
+  });
+
+  // 需要 Chromium + 网络，CI 环境常失败，本地可手动运行
+  it.skip('fetches example.com when given valid url', async () => {
+    const ctx: ToolContext = { senderId: 'owner-1', isOwner: true, sessionId: 'sess-1' };
+    const result = await browseUrlTool.execute({ url: 'https://example.com' }, ctx);
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('【标题】');
+    expect(result.content).toContain('【正文】');
+    expect(result.content.toLowerCase()).toContain('example');
+  }, 25_000);
 });

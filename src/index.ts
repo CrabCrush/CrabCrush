@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { randomBytes } from 'node:crypto';
 import { Command } from 'commander';
 import { loadConfig, findConfigPath } from './config/loader.js';
 import { KNOWN_PROVIDERS } from './config/schema.js';
@@ -88,9 +89,12 @@ program
       channels.push(dingtalk);
     }
 
+    // 生成或使用配置的访问令牌
+    const token = config.auth?.token || randomBytes(16).toString('hex');
+
     // 启动 Gateway（含 WebChat）
     const host = config.bind === 'all' ? '0.0.0.0' : '127.0.0.1';
-    const app = await startGateway({ port, bind: config.bind, agent });
+    const app = await startGateway({ port, bind: config.bind, agent, token });
 
     const { providerName, modelName } = router.primaryInfo;
     console.log(`\n🦀 CrabCrush Gateway 已启动`);
@@ -104,7 +108,10 @@ program
       );
       console.log(`   已加载提供商: ${names.join(', ')}`);
     }
-    console.log(`   WebChat: http://${host}:${port}`);
+    console.log(`   WebChat: http://${host}:${port}/?token=${token}`);
+    if (!config.auth?.token) {
+      console.log(`   (令牌每次启动自动生成，可在配置文件中设置 auth.token 固定)`)
+    }
 
     // 启动渠道适配器
     for (const channel of channels) {

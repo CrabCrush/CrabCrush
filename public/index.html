@@ -342,7 +342,13 @@
     // ── WebSocket 连接 ──
     function connect() {
       const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      ws = new WebSocket(`${protocol}//${location.host}/ws`);
+      // 传递 URL 中的 token 参数到 WebSocket 连接
+      const urlParams = new URLSearchParams(location.search);
+      const token = urlParams.get('token');
+      const wsUrl = token
+        ? `${protocol}//${location.host}/ws?token=${encodeURIComponent(token)}`
+        : `${protocol}//${location.host}/ws`;
+      ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
         statusEl.textContent = '已连接';

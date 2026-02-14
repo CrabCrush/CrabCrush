@@ -7,6 +7,12 @@ port: 18790
 # 绑定地址：loopback 仅本机访问，all 允许外部访问
 bind: loopback
 
+# 认证配置
+auth:
+  # WebChat 访问令牌（不设则每次启动自动生成随机令牌）
+  # 设置后可固定令牌，方便收藏书签
+  # token: your-fixed-token-here
+
 # 模型配置
 # 支持 DeepSeek、通义千问(qwen)、Kimi、智谱GLM(glm)、豆包(doubao) 等
 # 已知提供商不需要填 baseURL，自动补全

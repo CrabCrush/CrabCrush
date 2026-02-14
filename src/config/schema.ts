@@ -57,10 +57,18 @@ const channelsSchema = z.object({
   dingtalk: { enabled: false },
 });
 
+// 认证配置
+const authSchema = z.object({
+  /** WebChat 访问令牌。不设则每次启动自动生成 */
+  token: z.string().optional(),
+}).default({});
+
 // 主配置
 export const configSchema = z.object({
   port: z.number().int().min(1).max(65535).default(18790),
   bind: z.enum(['loopback', 'all']).default('loopback'),
+
+  auth: authSchema,
 
   models: z.record(z.string(), modelProviderSchema).default({}),
 

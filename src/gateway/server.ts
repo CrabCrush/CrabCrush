@@ -13,6 +13,8 @@ export interface GatewayOptions {
   bind?: 'loopback' | 'all';
   logger?: boolean;
   agent?: AgentRuntime;
+  /** 访问令牌，设置后 WebChat 和 WebSocket 需要 ?token=xxx */
+  token?: string;
 }
 
 /**
@@ -53,6 +55,13 @@ export async function startGateway(options: GatewayOptions = {}) {
   const host = options.bind === 'all' ? '0.0.0.0' : '127.0.0.1';
   const app = createGateway(options);
 
+  // Token 校验辅助函数
+  const token = options.token;
+  const validateToken = (query: Record<string, unknown>): boolean => {
+    if (!token) return true; // 未设置 token 则不校验
+    return (query as Record<string, string>).token === token;
+  };
+
   // 注册 WebSocket 插件
   await app.register(fastifyWebSocket);
 
@@ -60,7 +69,14 @@ export async function startGateway(options: GatewayOptions = {}) {
   if (options.agent) {
     const agent = options.agent;
 
-    app.get('/ws', { websocket: true }, (socket, _req) => {
+    app.get('/ws', { websocket: true }, (socket, req) => {
+      // Token 校验
+      if (!validateToken(req.query as Record<string, unknown>)) {
+        socket.send(JSON.stringify({ type: 'error', message: '无效的访问令牌' }));
+        socket.close(4001, 'Unauthorized');
+        return;
+      }
+
       let sessionId = `webchat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       let currentAbort: AbortController | null = null;
 
@@ -169,6 +185,27 @@ export async function startGateway(options: GatewayOptions = {}) {
   }
 
   // 静态文件服务（WebChat 前端）
+  // 如果设置了 token，需要在 URL 中携带 ?token=xxx 才能访问
+  if (token) {
+    app.addHook('onRequest', async (request, reply) => {
+      const url = request.url;
+      // /health 和 /ws 不在此拦截（/ws 有自己的校验）
+      if (url.startsWith('/health') || url.startsWith('/ws')) return;
+
+      if (!validateToken(request.query as Record<string, unknown>)) {
+        reply.status(401).type('text/html; charset=utf-8').send(
+          `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>CrabCrush</title></head>` +
+          `<body style="font-family:system-ui;background:#0f0f1a;color:#e8e8e8;display:flex;` +
+          `align-items:center;justify-content:center;height:100vh;flex-direction:column">` +
+          `<h1>🦀 需要访问令牌</h1>` +
+          `<p style="color:#777;margin-top:1rem">请使用启动时控制台打印的完整 URL 访问</p>` +
+          `<p style="color:#555;margin-top:0.5rem;font-size:0.85rem">格式：http://127.0.0.1:${port}/?token=xxx</p>` +
+          `</body></html>`,
+        );
+      }
+    });
+  }
+
   const publicDir = join(__dirname, '../../public');
   await app.register(fastifyStatic, {
     root: publicDir,

@@ -71,6 +71,15 @@ CrabCrush 要解决的核心问题：**让中国用户也能拥有一个真正�
 | **稳定性差** | 依赖 Claude API，网络波动导致任务失败 | 国产模型延迟低 + Failover 自动切换 |
 | **硬件绑定** | 推荐 Mac Mini M4 7×24 运行 | 任何有 Node.js 的设备都行 |
 
+**阿里云生产环境验证（2026-02 观察）：**
+
+阿里云已将 OpenClaw 整合进其生态（预装镜像 + 百炼 API + AppFlow），其生产环境中的核心卖点是：
+- 浏览器自动化（`agent-browser`）、邮件管理、文档处理——全是**工具能力**，再次验证 DEC-027
+- 钉钉对接用 AppFlow + Webhook（需要公网 IP + 配置复杂），CrabCrush 的 Stream 模式更简单
+- 需要云服务器（~50-200¥/月），且推荐美国区域（国内联网搜索受限）——验证了 CrabCrush 本地部署的价值
+- Skills 安装命令（`openclaw skills install/configure`）的交互模式值得借鉴（DEC-029）
+- Token 认证、API 缓存是我们应补齐的小功能
+
 **不应该学 OpenClaw 的地方：**
 - **原生 App**：OpenClaw 花大量精力做 macOS/iOS/Android App，CrabCrush 坚持"渠道即入口"，不需要额外 App
 - **大而全**：OpenClaw 9500+ commit、540 贡献者，代码量巨大。CrabCrush 保持精简，先做核心场景极致

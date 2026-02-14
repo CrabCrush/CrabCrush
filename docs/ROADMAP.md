@@ -110,6 +110,10 @@ Phase 0 (当前)   Phase 1        Phase 2a       Phase 2b       Phase 2c       P
 > 目标：从"能聊天"进化到"能干活"。工具能力优先于新渠道（详见 DEC-027）。
 > 核心逻辑：一个能帮你操作浏览器、查资料的钉钉机器人，比一个只能聊天的飞书机器人更有价值。
 
+### 2a.0 快速胜利（小改动、大价值）
+- [ ] WebChat Token 认证（当前任何人知道 IP+端口就能访问，安全隐患）
+- [ ] API 响应缓存（相同问题不重复调 API，省 token 省钱）
+
 ### 2a.1 本地对话持久化 + 上下文管理（兑现"本地优先"承诺）
 
 存储和发送是分开的：SQLite 存所有历史（持久化），API 只发精选上下文（省 token）。
@@ -124,21 +128,28 @@ Phase 0 (当前)   Phase 1        Phase 2a       Phase 2b       Phase 2c       P
   - [ ] Token 预算：设定上下文上限（如 8000 token），按预算裁剪
   - [ ] 摘要压缩（可选）：旧对话自动压缩为一段摘要，保留关键信息
 
-### 2a.2 Function Calling + 安全沙箱（必须同步上线，详见 DEC-026）
+### 2a.2 Function Calling + 安全沙箱（必须同步上线，详见 DEC-026、DEC-028）
 - [ ] Function Calling 协议支持（基于模型能力探测）
 - [ ] 能力不足时的降级策略（不支持 tool_call → 提示词注入方式）
 - [ ] Owner 认证机制（只有 owner 能触发本地操作类工具）
 - [ ] 代码执行沙箱选型决策（Docker vs 隔离进程 vs worker_threads）
+- [ ] 数据安全防线（DEC-028）：工具结果脱敏、列白名单、确认机制
 
 ### 2a.3 内置工具（按实用价值排序）
 - [ ] 浏览器控制（Playwright Core：搜索、截图、填表、抓取网页）
 - [ ] 文件操作（读写本地文件、文档解析）
+- [ ] 数据库查询（MySQL/PostgreSQL/SQLite，默认只读，列白名单）
 - [ ] 代码执行（沙箱内运行 Python/JS/Shell）
 - [ ] 网页搜索（百度/Google）
 
-### 2a.4 Skills 框架（借鉴 OpenClaw 的 SKILL.md 方式）
+### 2a.4 Skills 框架（详见 DEC-029）
+
+> 策略：工具定义用 OpenAI Function Calling 标准格式（行业通用），技能打包用自有格式。
+> 不直接兼容 OpenClaw Skills，但手动迁移成本低。考虑 MCP 兼容。
+
 - [ ] Skill 接口、加载器、生命周期管理（src/skills/）
-- [ ] 内置技能包：2-3 个示例技能
+- [ ] `crabcrush skills install <name>` + `crabcrush skills configure <name>` 命令
+- [ ] 内置技能包：2-3 个示例技能（如 database、browser）
 - [ ] 用户自定义技能目录：~/.crabcrush/workspace/skills/
 
 ### 2a.5 飞书渠道（工具就绪后再加）

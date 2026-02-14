@@ -154,7 +154,7 @@ V1 只做 WebChat + 钉钉两个渠道、DeepSeek + 通义千问两个模型的*
 - [x] WebChat：Markdown 渲染 + 代码高亮 + 停止生成
 - [x] 钉钉渠道：Stream 模式 + Markdown 卡片 + 会话隔离
 - [x] CLI：`crabcrush start` / `onboard` / `doctor`
-- [x] 21 条决策记录 + 完整文档体系
+- [x] 23 条决策记录 + 完整文档体系
 
 ### 下一步（Phase 2a：让 CrabCrush "能干活"）
 - [ ] 本地对话持久化（SQLite）+ 上下文窗口管理
@@ -167,7 +167,7 @@ V1 只做 WebChat + 钉钉两个渠道、DeepSeek + 通义千问两个模型的*
 | 文件 | 作用 | 何时读 |
 |------|------|--------|
 | `AGENTS.md`（本文件） | 项目全貌 + 当前进度 | **第一个读这个** |
-| `docs/DECISIONS.md` | 决策记录（21 条当前有效决策） | **第二个读这个** |
+| `docs/DECISIONS.md` | 决策记录（23 条当前有效决策） | **第二个读这个** |
 | `docs/ROADMAP.md` | 路线图 + 每项任务的验收标准（DoD） | 想知道"下一步做什么" |
 | `docs/ARCHITECTURE.md` | 技术架构 + 部署模式 | 想了解"怎么实现/怎么部署" |
 | `docs/VISION.md` | 愿景、竞品分析 | 想了解"为什么做这个" |

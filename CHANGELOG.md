@@ -4,6 +4,22 @@
 
 ---
 
+## [未发布]
+
+### 2026-02-14
+
+#### docs: 数据安全边界 + Skills 策略 + 阿里云 OpenClaw 对比
+
+4 个核心问题的分析和文档化：渠道能力一致性、Skills 兼容性、数据库操作、数据安全。
+
+- **DEC-028**：明确"本地优先"的真实边界——数据存储和工具执行在本地，但对话内容经过模型 API；定义五道安全防线
+- **DEC-029**：Skills 策略——工具定义用 OpenAI Function Calling 标准，技能打包用自有格式，考虑 MCP 兼容
+- **ROADMAP.md**：Phase 2a 新增 WebChat Token 认证、API 缓存（快速胜利）、数据库查询工具、Skills CLI 命令
+- **README.md**：新增诚实的数据隐私说明（DEC-028 引用）
+- **VISION.md**：补充阿里云生产环境 OpenClaw 的洞察（验证 DEC-027、Stream 模式优势）
+
+---
+
 ## [0.1.0] — 2026-02-13 (V1 Release)
 
 CrabCrush V1 正式发布。核心能力：WebChat + 钉钉双渠道纯对话，DeepSeek + 通义千问双模型，流式输出。

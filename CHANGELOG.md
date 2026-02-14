@@ -13,9 +13,8 @@
 对话历史不再重启即丢，兑现"本地优先"承诺。
 
 - **SQLite 存储层**（`src/storage/database.ts`）：conversations + messages 表，WAL 模式，零配置自动创建 `~/.crabcrush/data/conversations.db`
-- **滑动窗口**：API 只发最近 40 条消息（20 轮），不再全量发送，解决 token 无限增长问题
+- **滑动窗口**：API 只发最近 N 条消息（默认 40 条 = 20 轮），可通过 `agent.contextWindow` 配置调整
 - **WebChat 历史加载**：重连后自动加载历史消息，支持断线恢复
-- **向后兼容**：store 参数可选，不传则退化为纯内存模式（测试友好）
 - 新增 9 个存储层单元测试（总计 33 个）
 - 新增依赖：`better-sqlite3`
 

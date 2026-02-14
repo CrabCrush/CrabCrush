@@ -38,6 +38,10 @@ agent:
   systemPrompt: "你是 CrabCrush，一个友好的 AI 助手。请用中文回复。"
   maxTokens: 4096
 
+  # 发给 API 的最大消息条数（1 轮对话 = 2 条消息，默认 40 = 最近 20 轮）
+  # 越大记忆越长，但 token 消耗越多（= 越贵）
+  # contextWindow: 40
+
 # 渠道配置
 channels:
   # 钉钉机器人（Stream 模式，不需要公网 IP）

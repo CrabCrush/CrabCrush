@@ -77,11 +77,14 @@ export const configSchema = z.object({
     fallbackModels: z.array(z.string()).default([]),
     systemPrompt: z.string().default('你是 CrabCrush，一个友好的 AI 助手。请用中文回复。'),
     maxTokens: z.number().int().default(4096),
+    /** 发给 API 的最大消息条数（1 轮 = 2 条，默认 40 条 = 20 轮） */
+    contextWindow: z.number().int().min(2).max(200).default(40),
   }).default({
     model: 'deepseek-chat',
     fallbackModels: [],
     systemPrompt: '你是 CrabCrush，一个友好的 AI 助手。请用中文回复。',
     maxTokens: 4096,
+    contextWindow: 40,
   }),
 
   channels: channelsSchema,

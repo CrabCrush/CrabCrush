@@ -405,12 +405,11 @@
               welcomeShown = false;
             }
             for (const m of msg.messages) {
-              const el = addMessage(m.role, '');
-              const contentEl = el.querySelector('.msg-content');
-              if (contentEl) {
-                contentEl.innerHTML = renderMarkdown(m.content);
-                // 给代码块加复制按钮
-                contentEl.querySelectorAll('pre code').forEach(addCopyButton);
+              const el = addMessage(m.role, m.role === 'user' || m.role === 'error' ? m.content : '');
+              // assistant 消息：addMessage 只创建空 div，需手动渲染 Markdown
+              if (m.role === 'assistant' && m.content) {
+                el.innerHTML = md.render(m.content);
+                el.querySelectorAll('pre code').forEach(addCopyButton);
               }
             }
             messagesEl.scrollTop = messagesEl.scrollHeight;

@@ -256,12 +256,12 @@ export class AgentRuntime {
   }
 
   /**
-   * 判断发送者是否是 owner
+   * 判断发送者是否是 owner（DEC-026）
+   * 未配置 ownerIds 时默认所有人都是 owner（单用户场景）
    */
   private isOwner(senderId?: string): boolean {
+    if (this.ownerIds.size === 0) return true; // 未配置 = 单用户模式
     if (!senderId) return false;
-    // 如果没配 ownerIds，默认所有人都是 owner（单用户场景）
-    if (this.ownerIds.size === 0) return true;
     return this.ownerIds.has(senderId);
   }
 

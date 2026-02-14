@@ -246,6 +246,7 @@
 ## DEC-023：构建工具 — tsdown
 
 - **决策**：使用 **tsdown** 作为 TypeScript 构建工具
+- **当前实现**：暂用 **tsc**（零配置、足够用）。tsdown 待 Phase 2 需要打包/双格式时再迁移。
 - **候选**：tsup、tsdown、tsc、esbuild
 - **理由**：
   1. tsdown 是 tsup 的官方后继者，同一作者（@sxzz），API 兼容
@@ -262,6 +263,7 @@
 ## DEC-024：日志框架 — pino
 
 - **决策**：使用 **pino** 作为日志框架
+- **当前实现**：暂用 Fastify 内置 logger（基于 pino）。`~/.crabcrush/logs/` 等完整策略待 Phase 2 实现。
 - **候选**：pino、winston、bunyan、console
 - **理由**：
   1. 极致性能：比 winston 快 5-10 倍，适合高吞吐消息网关场景

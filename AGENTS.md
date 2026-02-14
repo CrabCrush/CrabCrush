@@ -97,18 +97,33 @@ crabcrush/
 │   ├── gateway/           # 网关核心
 │   │   └── server.ts      # Fastify HTTP + WebSocket + 静态文件
 │   ├── agent/             # Agent 运行时
-│   │   └── runtime.ts     # 会话管理 + 多轮上下文
+│   │   └── runtime.ts     # 会话管理 + 多轮上下文 + 工具调用循环
 │   ├── models/            # 模型适配层
-│   │   └── provider.ts    # OpenAI 兼容适配器（SSE 流式 + 超时 + 重试）
+│   │   ├── provider.ts    # OpenAI 兼容适配器（SSE 流式 + Function Calling）
+│   │   ├── router.ts      # 模型路由器 + Failover
+│   │   └── pricing.ts    # 费用估算
+│   ├── storage/           # 本地持久化
+│   │   └── database.ts    # SQLite 对话存储
+│   ├── tools/             # 工具系统
+│   │   ├── types.ts       # Tool 接口（OpenAI Function Calling 格式）
+│   │   ├── registry.ts   # 工具注册中心
+│   │   └── builtin/       # 内置工具
+│   │       ├── index.ts
+│   │       └── time.ts    # get_current_time
+│   ├── cli/               # CLI 子命令
+│   │   ├── onboard.ts     # 向导式配置
+│   │   └── doctor.ts      # 自检诊断
 │   └── channels/          # 渠道适配器
 │       ├── types.ts       # ChannelAdapter 接口 + ChatHandler 类型
 │       └── dingtalk.ts    # 钉钉 Stream 模式
 ├── public/                # WebChat 前端（单页 HTML）
-│   └── index.html         # 聊天界面（Markdown + 代码高亮 + 流式输出）
+│   └── index.html         # 聊天界面（Markdown + 代码高亮 + 流式输出 + 工具调用展示）
 └── test/                  # 测试
     ├── gateway.test.ts    # Gateway 单元测试
     ├── config.test.ts     # 配置模块测试
     ├── models.test.ts     # 模型适配器测试
+    ├── storage.test.ts    # 存储层测试
+    ├── tools.test.ts      # 工具系统测试
     └── channels.test.ts   # 渠道适配器测试
 ```
 
@@ -122,7 +137,7 @@ crabcrush/
 ## V1 产品硬边界（详见 DEC-011）
 
 V1 只做 WebChat + 钉钉两个渠道、DeepSeek + 通义千问两个模型的**纯对话**（多轮上下文 + 流式输出）。
-不含工具调用、Skills 框架、语音、知识库等。完整的包含/不包含清单和成功标准见 DEC-011。
+DEC-011 定义 V1 不含工具调用；V1 发布后 Phase 2a 已部分实现（见下方当前阶段）。
 
 ## 部署模式（详见 DEC-010、docs/ARCHITECTURE.md 第五章）
 
@@ -142,7 +157,7 @@ V1 只做 WebChat + 钉钉两个渠道、DeepSeek + 通义千问两个模型的*
 
 ## 当前阶段
 
-**V1 已发布（v0.1.0）** — 最后更新：2026-02-13
+**V1 已发布（v0.1.0）** — 最后更新：2026-02-14
 
 ### V1 已完成
 - [x] 工程脚手架：pnpm + TypeScript strict + Fastify v5 + Commander.js + Zod + Vitest + ESLint + GitHub Actions CI
@@ -156,11 +171,16 @@ V1 只做 WebChat + 钉钉两个渠道、DeepSeek + 通义千问两个模型的*
 - [x] CLI：`crabcrush start` / `onboard` / `doctor`
 - [x] 23 条决策记录 + 完整文档体系
 
-### 下一步（Phase 2a：让 CrabCrush "能干活"）
-- [ ] 本地对话持久化（SQLite）+ 上下文窗口管理
-- [ ] Function Calling + 安全沙箱
-- [ ] 内置工具（浏览器控制、文件操作）
-- [ ] Skills 框架
+### Phase 2a 已完成（部分）
+- [x] WebChat Token 认证（2a.0）
+- [x] SQLite 对话持久化 + 滑动窗口（2a.1）
+- [x] Function Calling + Owner 认证（2a.2）
+- [x] 内置工具 `get_current_time`（2a.2 验证）
+
+### 下一步（Phase 2a 续）
+- [ ] 内置工具：浏览器控制、文件操作、数据库查询（2a.3）
+- [ ] Skills 框架（2a.4）
+- [ ] 飞书渠道（2a.5）
 - 详见 `docs/ROADMAP.md` Phase 2a
 
 ### 文档体系

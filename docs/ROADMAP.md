@@ -111,27 +111,27 @@ Phase 0 (当前)   Phase 1        Phase 2a       Phase 2b       Phase 2c       P
 > 核心逻辑：一个能帮你操作浏览器、查资料的钉钉机器人，比一个只能聊天的飞书机器人更有价值。
 
 ### 2a.0 快速胜利（小改动、大价值）
-- [ ] WebChat Token 认证（当前任何人知道 IP+端口就能访问，安全隐患）
+- [x] WebChat Token 认证（当前任何人知道 IP+端口就能访问，安全隐患）
 - [ ] API 响应缓存（相同问题不重复调 API，省 token 省钱）
 
 ### 2a.1 本地对话持久化 + 上下文管理（兑现"本地优先"承诺）
 
 存储和发送是分开的：SQLite 存所有历史（持久化），API 只发精选上下文（省 token）。
 
-- [ ] SQLite 存储对话历史（`~/.crabcrush/data/conversations.db`）
-- [ ] Gateway 重启后恢复历史会话
-- [ ] WebChat 显示历史对话列表
+- [x] SQLite 存储对话历史（`~/.crabcrush/data/conversations.db`）
+- [x] Gateway 重启后恢复历史会话（WebChat 重连时 loadHistory）
+- [ ] WebChat 显示历史对话列表（多会话切换）
 - [ ] 对话搜索（按关键词 / 时间范围）
 - [ ] 对话导出（JSON / Markdown）
-- [ ] 上下文窗口管理（替代当前"全发"策略）：
-  - [ ] 滑动窗口：只发最近 N 轮（默认 20 轮），超出的截断
+- [x] 上下文窗口管理（替代当前"全发"策略）：
+  - [x] 滑动窗口：只发最近 N 轮（默认 40 条 = 20 轮，可配置 `agent.contextWindow`）
   - [ ] Token 预算：设定上下文上限（如 8000 token），按预算裁剪
   - [ ] 摘要压缩（可选）：旧对话自动压缩为一段摘要，保留关键信息
 
 ### 2a.2 Function Calling + 安全沙箱（必须同步上线，详见 DEC-026、DEC-028）
-- [ ] Function Calling 协议支持（基于模型能力探测）
+- [x] Function Calling 协议支持（OpenAI 兼容格式）
 - [ ] 能力不足时的降级策略（不支持 tool_call → 提示词注入方式）
-- [ ] Owner 认证机制（只有 owner 能触发本地操作类工具）
+- [x] Owner 认证机制（`ownerIds` 配置，未配置时默认所有人是 owner）
 - [ ] 代码执行沙箱选型决策（Docker vs 隔离进程 vs worker_threads）
 - [ ] 数据安全防线（DEC-028）：工具结果脱敏、列白名单、确认机制
 

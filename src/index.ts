@@ -103,8 +103,8 @@ program
         clientId: dt.clientId,
         clientSecret: dt.clientSecret,
       });
-      dingtalk.setChatHandler((sessionId, content, signal) =>
-        agent.chat(sessionId, content, signal),
+      dingtalk.setChatHandler((sessionId, content, signal, senderId) =>
+        agent.chat(sessionId, content, signal, senderId),
       );
       channels.push(dingtalk);
     }

@@ -8,6 +8,14 @@
 
 ### 2026-02-14
 
+#### fix: 文档同步 + senderId 传递（查缺补漏）
+
+- **AGENTS.md**：更新当前阶段（Phase 2a 已完成项）、下一步、目录结构（含 storage/tools/cli/router/pricing）
+- **ROADMAP.md**：勾选已实现项（Token 认证、SQLite、滑动窗口、Function Calling、Owner 认证）
+- **senderId 传递**：ChatHandler 增加第 4 参数 senderId；钉钉传 `senderStaffId`；WebChat 传 `sessionId`；`isOwner` 逻辑修正（未配置 ownerIds 时默认所有人是 owner）
+- **DEC-023 / DEC-024**：注明当前实现状态（tsc / Fastify 内置 logger）
+- **REVIEW-2026-02.md**：补充修复记录
+
 #### feat: Function Calling + 工具系统（Phase 2a.2）
 
 CrabCrush 从"能聊天"进化到"能干活"。

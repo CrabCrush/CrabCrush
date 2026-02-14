@@ -101,9 +101,10 @@ export class DingTalkAdapter implements ChannelAdapter {
       );
 
       // 调用 Agent 获取回复（收集全部 chunks，跳过工具调用事件）
+      // 传入 senderStaffId 用于 Owner 权限判断（DEC-026）
       let fullContent = '';
       try {
-        for await (const event of this.chatHandler(sessionId, content)) {
+        for await (const event of this.chatHandler(sessionId, content, undefined, payload.senderStaffId)) {
           // 跳过 ToolCallEvent，只收集文本内容
           if ('type' in event && (event as { type: string }).type === 'tool_call') continue;
           const chunk = event as { content: string };

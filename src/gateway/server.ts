@@ -136,7 +136,8 @@ export async function startGateway(options: GatewayOptions = {}) {
 
             try {
               // 流式回复（支持 ChatChunk 和 ToolCallEvent 两种事件）
-              for await (const event of agent.chat(sessionId, msg.content, abort.signal)) {
+              // WebChat 用 sessionId 作为 senderId（DEC-026 Owner 判断）
+              for await (const event of agent.chat(sessionId, msg.content, abort.signal, sessionId)) {
                 if (socket.readyState !== 1) break;
 
                 // 工具调用事件

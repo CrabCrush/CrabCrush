@@ -10,11 +10,13 @@ import type { ToolCallEvent } from '../agent/runtime.js';
  * 聊天处理函数
  * 对应 AgentRuntime.chat() 的签名
  * 返回 ChatChunk（文本）或 ToolCallEvent（工具调用）
+ * @param senderId - 发送者 ID（钉钉 userId / WebChat sessionId），用于 Owner 权限判断（DEC-026）
  */
 export type ChatHandler = (
   sessionId: string,
   content: string,
   signal?: AbortSignal,
+  senderId?: string,
 ) => AsyncIterable<ChatChunk | ToolCallEvent>;
 
 /**

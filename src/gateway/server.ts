@@ -102,6 +102,17 @@ export async function startGateway(options: GatewayOptions = {}) {
             sessionId = msg.sessionId;
           }
 
+          // 客户端请求加载历史
+          if (msg.type === 'loadHistory') {
+            const history = agent.getHistory(sessionId);
+            socket.send(JSON.stringify({
+              type: 'history',
+              sessionId,
+              messages: history,
+            }));
+            return;
+          }
+
           // 中断生成
           if (msg.type === 'stop') {
             currentAbort?.abort();

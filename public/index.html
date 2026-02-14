@@ -354,6 +354,11 @@
         statusEl.textContent = '已连接';
         statusEl.className = 'connected';
         if (!isStreaming) sendBtn.disabled = false;
+
+        // 如果有已保存的 sessionId，请求加载历史消息
+        if (sessionId) {
+          ws.send(JSON.stringify({ type: 'loadHistory', sessionId }));
+        }
       };
 
       ws.onclose = () => {
@@ -374,6 +379,26 @@
         if (msg.type === 'session') {
           sessionId = msg.sessionId;
           localStorage.setItem('crabcrush_session', sessionId);
+
+        } else if (msg.type === 'history') {
+          // 服务器返回历史消息，渲染到聊天区域
+          if (msg.messages && msg.messages.length > 0) {
+            // 清除欢迎消息
+            if (welcomeShown) {
+              messagesEl.innerHTML = '';
+              welcomeShown = false;
+            }
+            for (const m of msg.messages) {
+              const el = addMessage(m.role, '');
+              const contentEl = el.querySelector('.msg-content');
+              if (contentEl) {
+                contentEl.innerHTML = renderMarkdown(m.content);
+                // 给代码块加复制按钮
+                contentEl.querySelectorAll('pre code').forEach(addCopyButton);
+              }
+            }
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+          }
 
         } else if (msg.type === 'chunk') {
           if (!currentBotMsg) {

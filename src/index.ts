@@ -1,12 +1,15 @@
 #!/usr/bin/env node
 
 import { randomBytes } from 'node:crypto';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
 import { Command } from 'commander';
 import { loadConfig, findConfigPath } from './config/loader.js';
 import { KNOWN_PROVIDERS } from './config/schema.js';
 import { OpenAICompatibleProvider } from './models/provider.js';
 import { ModelRouter } from './models/router.js';
 import { AgentRuntime } from './agent/runtime.js';
+import { ConversationStore } from './storage/database.js';
 import { startGateway } from './gateway/server.js';
 import { DingTalkAdapter } from './channels/dingtalk.js';
 import { runDoctor } from './cli/doctor.js';
@@ -66,12 +69,18 @@ program
       config.agent.fallbackModels,
     );
 
-    // 初始化 Agent
-    const agent = new AgentRuntime(
+    // 初始化 SQLite 对话存储
+    const dbPath = join(homedir(), '.crabcrush', 'data', 'conversations.db');
+    const store = new ConversationStore(dbPath);
+
+    // 初始化 Agent（带持久化 + 滑动窗口）
+    const agent = new AgentRuntime({
       router,
-      config.agent.systemPrompt,
-      config.agent.maxTokens,
-    );
+      systemPrompt: config.agent.systemPrompt,
+      maxTokens: config.agent.maxTokens,
+      store,
+      contextWindow: 40, // 最近 20 轮对话
+    });
 
     // 渠道适配器列表
     const channels: ChannelAdapter[] = [];
@@ -134,6 +143,8 @@ program
           await channel.stop();
         } catch { /* ignore */ }
       }
+      // 关闭数据库
+      store.close();
       // 再停 Gateway
       await app.close();
       console.log('🦀 已停止。再见！');

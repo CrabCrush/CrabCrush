@@ -8,6 +8,17 @@
 
 ### 2026-02-14
 
+#### feat: SQLite 对话持久化 + 滑动窗口（Phase 2a.1）
+
+对话历史不再重启即丢，兑现"本地优先"承诺。
+
+- **SQLite 存储层**（`src/storage/database.ts`）：conversations + messages 表，WAL 模式，零配置自动创建 `~/.crabcrush/data/conversations.db`
+- **滑动窗口**：API 只发最近 40 条消息（20 轮），不再全量发送，解决 token 无限增长问题
+- **WebChat 历史加载**：重连后自动加载历史消息，支持断线恢复
+- **向后兼容**：store 参数可选，不传则退化为纯内存模式（测试友好）
+- 新增 9 个存储层单元测试（总计 33 个）
+- 新增依赖：`better-sqlite3`
+
 #### feat: WebChat Token 认证（Phase 2a.0 快速胜利）
 
 WebChat 现在需要访问令牌，解决"任何人知道 IP+端口就能使用"的安全隐患。

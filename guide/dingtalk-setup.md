@@ -47,6 +47,8 @@ export CRABCRUSH_DINGTALK_CLIENT_ID=你的AppKey
 export CRABCRUSH_DINGTALK_CLIENT_SECRET=你的AppSecret
 ```
 
+> **使用工具（搜索、抓网页）？** 若配置了 `ownerIds`，需把钉钉用户的 `senderStaffId` 加进去；不配置时默认所有人都是 owner。控制台日志会打印收到的 `senderStaffId`。
+
 > 使用环境变量时不需要在 yaml 里写 `clientId` / `clientSecret`，
 > 只要环境变量存在，钉钉渠道会自动启用。
 

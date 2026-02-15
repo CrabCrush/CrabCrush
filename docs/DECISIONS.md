@@ -326,6 +326,29 @@
 
 ---
 
+## DEC-031：钉钉 Block Streaming — 借鉴 OpenClaw
+
+- **状态**：已规划，待实现（见 ROADMAP Phase 1.1 / 2a）
+- **背景**：钉钉 sessionWebhook 不支持 token 级流式，当前实现等整条回复再发，用户体感慢。OpenClaw 对 WhatsApp/Slack 等渠道采用 Block Streaming：按块分片发送，边生成边发。
+- **决策**：规划引入 Block Streaming，钉钉/飞书等非 WebSocket 渠道按块发送多条消息
+- **参考**：OpenClaw `blockStreamingChunk`（min/max 字符）、`blockStreamingCoalesce`（合并小块）、`textChunkLimit`（渠道上限）
+- **实现时机**：飞书/企微接入时一并抽象为渠道层通用能力，避免钉钉单点实现
+
+---
+
+## DEC-032：人格化与工作区 — 借鉴 OpenClaw
+
+- **状态**：已规划，待实现（见 ROADMAP 2a.5）
+- **背景**：OpenClaw 通过工作区文件（SOUL.md、IDENTITY.md、USER.md）和 Bootstrap 首次对话，实现 AI 有名字、知道如何称呼用户、可配置语气性格。用户体感"智能"、"像真人"。
+- **决策**：规划引入工作区 + Bootstrap 机制
+  1. **工作区**：`~/.crabcrush/workspace/` 存放 IDENTITY.md（AI 名字/emoji/语气）、USER.md（用户名字/称呼）、SOUL.md（性格边界，可选）
+  2. **系统提示词组装**：每次对话前注入工作区文件，替代或补充 `agent.systemPrompt`
+  3. **Bootstrap**：工作区为空时，AI 主动问「我是谁？怎么称呼你？喜欢什么语气？」并写入文件（需 `write_workspace` 工具或后端逻辑）
+  4. **配置**：`agent.skipBootstrap`、`agent.workspace`
+- **简化原则**：先做 IDENTITY + USER，SOUL 可选；不做 OpenClaw 的 HEARTBEAT、BOOT、MEMORY 等，保持精简
+
+---
+
 ## DEC-028："本地优先"的真实边界 — 数据安全与诚实承诺
 
 - **状态**：当前有效

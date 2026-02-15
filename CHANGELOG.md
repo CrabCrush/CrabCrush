@@ -8,6 +8,24 @@
 
 ### 2026-02-14
 
+#### docs: 人格化与工作区规划（借鉴 OpenClaw）
+
+- **DEC-032**：规划工作区（IDENTITY.md、USER.md、SOUL.md）+ Bootstrap 首次对话
+- **ROADMAP 2a.5**：AI 有名字、知道如何称呼用户、可配置语气，首次对话主动询问并持久化
+- 参考：OpenClaw 的 SOUL/IDENTITY/USER 文件注入 + BOOTSTRAP.md 采访脚本
+
+#### docs: 钉钉 Block Streaming 规划（借鉴 OpenClaw）
+
+- **DEC-031**：规划引入 Block Streaming，钉钉/飞书等渠道按块分片发送，边生成边发
+- **ROADMAP**：Phase 1.1 新增钉钉 Block Streaming 待办，飞书接入时一并抽象为渠道通用能力
+- 参考：OpenClaw `blockStreamingChunk`、`blockStreamingCoalesce`、`textChunkLimit`
+
+#### fix: 钉钉渠道体验优化
+
+- **先发「正在思考…」**：无流式时先给用户即时反馈，再发最终回复
+- **消息截断**：按钉钉 API 限制（text 2000 / markdown 4000 字符）截断，超长加「内容已截断」提示，避免发送失败导致无应答
+- **工具调用提示**：回复中附带「🔧 已调用：search_web、browse_url」等，与 WebChat 体验一致
+
 #### chore: 规划与体验优化
 
 - **ROADMAP**：标注 Phase 2a 里程碑达成（search_web 已实现）

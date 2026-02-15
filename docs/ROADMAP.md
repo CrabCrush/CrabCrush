@@ -75,14 +75,19 @@ Phase 0 (当前)   Phase 1        Phase 2a       Phase 2b       Phase 2c       P
 ### 1.1 钉钉渠道 — 企业内部应用机器人（详见 DEC-003）
 - [x] Stream 模式接入（优先，不需要公网入口）
   - DoD：本地启动 Gateway，钉钉群内 @机器人 → 收到回复，完整链路跑通
-- [ ] HTTP 回调模式（备选）→ 推迟到 Phase 2a.5（飞书/企微需要时再做）
-- [ ] 回调签名验证 → 推迟到 Phase 2a.5（依赖 HTTP 回调）
+- [ ] HTTP 回调模式（备选）→ 推迟到 Phase 2a.6（飞书/企微需要时再做）
+- [ ] 回调签名验证 → 推迟到 Phase 2a.6（依赖 HTTP 回调）
 - [x] 消息卡片（Markdown ActionCard）
   - DoD：长文本回复以 Markdown 卡片形式展示（自动检测 Markdown 特征）
 - [x] 验证渠道抽象层
   - DoD：钉钉适配器完全通过 ChannelAdapter 接口实现，无特殊硬编码
 - [x] 多人 Session 隔离（详见 DEC-011）
   - DoD：同一群内不同用户 @机器人，各自上下文独立（按 senderStaffId 隔离）
+- [ ] 钉钉 Block Streaming（借鉴 OpenClaw）
+  - 背景：钉钉 sessionWebhook 不支持 token 级流式，当前等整条回复再发，体感慢
+  - 方案：按块分片发送（如每 500–1500 字符发一条），边生成边发，减少等待感
+  - 参考：OpenClaw `blockStreamingChunk`、`blockStreamingCoalesce`、`textChunkLimit`
+  - 优先级：Phase 2a 后期或 2b（飞书/企微接入时一并抽象为渠道通用能力）
 
 ### 1.2 模型层完善
 - [x] 模型路由器（自动匹配提供商 + 显式 `providerId/modelName` 格式）
@@ -154,10 +159,19 @@ Phase 0 (当前)   Phase 1        Phase 2a       Phase 2b       Phase 2c       P
 - [ ] 内置技能包：2-3 个示例技能（如 database、browser）
 - [ ] 用户自定义技能目录：~/.crabcrush/workspace/skills/
 
-### 2a.5 飞书渠道（工具就绪后再加）
+### 2a.5 人格化与工作区（借鉴 OpenClaw，详见 DEC-032）
+
+> 目标：AI 有名字、知道如何称呼用户、可配置语气性格，首次对话主动询问并持久化。
+
+- [ ] 工作区目录 `~/.crabcrush/workspace/`：IDENTITY.md（AI 名字/emoji/语气）、USER.md（用户名字/称呼）、SOUL.md（性格边界，可选）
+- [ ] 系统提示词组装：每次对话前注入工作区文件内容（替代或补充 `agent.systemPrompt`）
+- [ ] Bootstrap 首次对话：工作区为空时，AI 主动问「我是谁？怎么称呼你？喜欢什么语气？」并写入文件
+- [ ] 配置：`agent.skipBootstrap` 跳过引导、`agent.workspace` 自定义路径
+
+### 2a.6 飞书渠道（工具就绪后再加）
 - [ ] 飞书适配器（验证渠道抽象层复用度）
 
-### 2a.6 配置热加载（详见 DEC-018）
+### 2a.7 配置热加载（详见 DEC-018）
 - [ ] 配置文件变更检测
 - [ ] 运行时重新加载（不重启 Gateway）
 

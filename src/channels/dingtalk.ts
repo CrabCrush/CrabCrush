@@ -3,9 +3,11 @@
  *
  * 工作原理：
  * 1. 通过 dingtalk-stream SDK 主动连接钉钉服务器（不需要公网 IP）
- * 2. 收到 @机器人 消息后，调用 Agent 获取回复
+ * 2. 收到 @机器人 消息后，先发「正在思考…」再调用 Agent 获取回复
  * 3. 通过 sessionWebhook 发送回复（支持 Markdown）
  * 4. 按 senderStaffId 隔离会话（同群不同人独立上下文）
+ *
+ * 限制：钉钉 API 消息长度限制（text 2048 字节 / markdown 4096 字节），超长自动截断
  */
 
 import { DWClient, TOPIC_ROBOT } from 'dingtalk-stream';
@@ -15,6 +17,10 @@ export interface DingTalkConfig {
   clientId: string;
   clientSecret: string;
 }
+
+/** 钉钉 API 消息长度限制（字节，保守取字符数） */
+const DINGTALK_TEXT_MAX = 2000;
+const DINGTALK_MARKDOWN_MAX = 4000;
 
 /** 钉钉 Stream 消息结构 */
 interface RobotMessage {
@@ -100,13 +106,20 @@ export class DingTalkAdapter implements ChannelAdapter {
         `[钉钉] ${payload.senderNick}(${payload.senderStaffId}): ${content.length > 50 ? content.slice(0, 50) + '...' : content}`,
       );
 
-      // 调用 Agent 获取回复（收集全部 chunks，跳过工具调用事件）
+      // 先发「正在思考…」给用户即时反馈（钉钉无流式，体感慢）
+      await this.sendReply(payload, '正在思考…');
+
+      // 调用 Agent 获取回复（收集文本 + 工具调用记录）
       // 传入 senderStaffId 用于 Owner 权限判断（DEC-026）
       let fullContent = '';
+      const toolNames: string[] = [];
       try {
         for await (const event of this.chatHandler(sessionId, content, undefined, payload.senderStaffId)) {
-          // 跳过 ToolCallEvent，只收集文本内容
-          if ('type' in event && (event as { type: string }).type === 'tool_call') continue;
+          if ('type' in event && (event as { type: string }).type === 'tool_call') {
+            const tc = event as { name: string };
+            if (!toolNames.includes(tc.name)) toolNames.push(tc.name);
+            continue;
+          }
           const chunk = event as { content: string };
           fullContent += chunk.content;
         }
@@ -118,7 +131,12 @@ export class DingTalkAdapter implements ChannelAdapter {
         fullContent = '抱歉，我没有生成有效的回复。';
       }
 
-      // 通过 sessionWebhook 发送回复
+      // 若有工具调用，在文首附带提示（与 WebChat 体验一致）
+      if (toolNames.length > 0) {
+        fullContent = `🔧 已调用：${toolNames.join('、')}\n\n${fullContent}`;
+      }
+
+      // 通过 sessionWebhook 发送回复（内部按钉钉限制截断）
       await this.sendReply(payload, fullContent);
 
       // 确认消息已处理（避免钉钉重复推送）
@@ -132,6 +150,7 @@ export class DingTalkAdapter implements ChannelAdapter {
   /**
    * 通过 sessionWebhook 发送回复
    * 短消息用 text 格式，长消息用 markdown 格式
+   * 按钉钉 API 限制截断，避免超长导致发送失败
    */
   private async sendReply(
     payload: RobotMessage,
@@ -146,6 +165,14 @@ export class DingTalkAdapter implements ChannelAdapter {
       content.includes('# ') ||
       content.includes('**');
 
+    const maxLen = useMarkdown ? DINGTALK_MARKDOWN_MAX : DINGTALK_TEXT_MAX;
+    let text = content;
+    if (text.length > maxLen) {
+      const suffix = useMarkdown ? '\n\n_（内容已截断）_' : '\n\n（内容已截断）';
+      text = text.slice(0, maxLen - suffix.length) + suffix;
+      console.log(`[钉钉] 回复超长，已截断至 ${maxLen} 字符`);
+    }
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let body: Record<string, any>;
 
@@ -154,14 +181,14 @@ export class DingTalkAdapter implements ChannelAdapter {
         msgtype: 'markdown',
         markdown: {
           title: 'CrabCrush',
-          text: content,
+          text,
         },
       };
     } else {
       body = {
         msgtype: 'text',
         text: {
-          content,
+          content: text,
         },
       };
     }

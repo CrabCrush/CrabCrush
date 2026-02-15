@@ -6,6 +6,23 @@
 
 ## [未发布]
 
+### 2026-02-15
+
+#### fix: WebChat 前端本地化（解决国内 CDN 超时）
+
+- **问题**：从 cdn.jsdelivr.net 加载 markdown-it、highlight.js 常超时，导致 `window.markdownit is not a function`、favicon 401
+- **做法**：将两库预先放入 `public/vendor/` 并提交，页面优先加载本地文件，不依赖外网
+- **Gateway**：`/favicon.ico`、`/vendor/*` 不再要求 token，避免静态资源 401
+- **scripts/copy-vendor.js**：仅维护者使用，从多 CDN 拉取以刷新 vendor（改 URL 版本号后执行并提交）；普通用户无需运行
+- **package.json**：移除 markdown-it、highlight.js 依赖（运行时只用 public/vendor/）
+- **README**：说明前端库已随仓库提供，克隆即用
+
+#### docs: OpenClaw 分析与人格化引用
+
+- 新增 `docs/OPENCLAW_ANALYSIS.md`：规则/记忆/人格化/Token 策略与借鉴建议
+- **AGENTS.md / ROADMAP 2a.5**：人格化与工作区实现参考该文档
+- **README**：参与开发或 AI 协助时请先读 AGENTS.md、DECISIONS.md
+
 ### 2026-02-14
 
 #### docs: 人格化与工作区规划（借鉴 OpenClaw）

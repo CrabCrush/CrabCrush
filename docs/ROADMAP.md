@@ -162,6 +162,7 @@ Phase 0 (当前)   Phase 1        Phase 2a       Phase 2b       Phase 2c       P
 ### 2a.5 人格化与工作区（借鉴 OpenClaw，详见 DEC-032）
 
 > 目标：AI 有名字、知道如何称呼用户、可配置语气性格，首次对话主动询问并持久化。
+> 实现时可参考 [OpenClaw 实现分析](OPENCLAW_ANALYSIS.md)（规则/记忆/人格化与 Token 策略）。
 
 - [ ] 工作区目录 `~/.crabcrush/workspace/`：IDENTITY.md（AI 名字/emoji/语气）、USER.md（用户名字/称呼）、SOUL.md（性格边界，可选）
 - [ ] 系统提示词组装：每次对话前注入工作区文件内容（替代或补充 `agent.systemPrompt`）

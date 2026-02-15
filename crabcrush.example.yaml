@@ -41,8 +41,7 @@ agent:
   systemPrompt: "你是 CrabCrush，一个友好的 AI 助手。请用中文回复。"
   maxTokens: 4096
 
-  # 发给 API 的最大消息条数（1 轮对话 = 2 条消息，默认 40 = 最近 20 轮）
-  # 越大记忆越长，但 token 消耗越多（= 越贵）
+  # 发给 API 的最大消息条数（1 轮对话 = 2 条消息，默认 40 = 最近 20 轮），越大记忆越长，但 token 消耗越多（= 越贵）
   # contextWindow: 40
 
 # Owner 用户 ID（只有 owner 能触发本地操作类工具）

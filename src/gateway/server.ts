@@ -219,6 +219,8 @@ export async function startGateway(options: GatewayOptions = {}) {
       const url = request.url;
       // /health 和 /ws 不在此拦截（/ws 有自己的校验）
       if (url.startsWith('/health') || url.startsWith('/ws')) return;
+      // 静态资源：favicon、vendor（markdown-it/highlight.js）无需 token，避免 401
+      if (url === '/favicon.ico' || url.startsWith('/vendor/')) return;
 
       if (!validateToken(request.query as Record<string, unknown>)) {
         reply.status(401).type('text/html; charset=utf-8').send(

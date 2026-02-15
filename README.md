@@ -60,6 +60,8 @@ pnpm install
 > npx playwright install chromium
 > ```
 > 运行 `crabcrush doctor` 可检查是否已安装。
+>
+> **说明**：WebChat 所需的前端库（markdown-it、highlight.js）已随仓库放在 `public/vendor/`，克隆即用，无需安装或运行任何脚本。
 
 ### 2. 配置模型
 
@@ -170,7 +172,7 @@ crabcrush/
 
 ## 给开发者和 AI 助手
 
-本项目采用"文档即大脑"的协作模式。AI 助手请先阅读：
+本项目采用"文档即大脑"的协作模式。参与开发或让 AI 协助时，请先阅读以下两份文档：
 
 1. [`AGENTS.md`](./AGENTS.md) — 项目全貌 + 当前进度
 2. [`docs/DECISIONS.md`](./docs/DECISIONS.md) — 关键决策的背景和理由

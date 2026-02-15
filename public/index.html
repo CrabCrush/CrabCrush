@@ -4,7 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CrabCrush - AI 助手</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github-dark.min.css">
+  <!-- 本地 vendor 优先，避免 CDN 超时；无 token 时也可加载 -->
+  <link rel="stylesheet" href="/vendor/github-dark.min.css" onerror="this.onerror=null;this.href='https://unpkg.npmmirror.com/highlight.js@11.11.1/styles/github-dark.min.css'">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     :root {
@@ -313,20 +314,27 @@
     <button id="stop-btn" class="action-btn">停止</button>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/markdown-it@14/dist/markdown-it.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11/highlight.min.js"></script>
+  <!-- 本地 /vendor 优先（不依赖外网 CDN）；失败时回退到国内 npmmirror -->
+  <script src="/vendor/markdown-it.min.js"></script>
+  <script src="/vendor/highlight.min.js" onerror="this.onerror=null;(function(){var s=document.createElement('script');s.src='https://unpkg.npmmirror.com/highlight.js@11.11.1/build/highlight.min.js';document.body.appendChild(s);})();"></script>
   <script>
-    // ── Markdown 渲染器 ──
+    // ── Markdown 渲染器（无 markdownit 时页面会报错，需保证 /vendor/markdown-it.min.js 存在）──
+    if (typeof window.markdownit !== 'function') {
+      console.error('markdown-it 未加载，请运行: node scripts/copy-vendor.js');
+      throw new Error('markdown-it 未加载');
+    }
     const md = window.markdownit({
       html: false,
       linkify: true,
       typographer: true,
       highlight(str, lang) {
-        if (lang && hljs.getLanguage(lang)) {
-          try { return hljs.highlight(str, { language: lang }).value; } catch {}
+        if (typeof hljs !== 'undefined' && hljs.highlight) {
+          if (lang && hljs.getLanguage(lang)) {
+            try { return hljs.highlight(str, { language: lang }).value; } catch {}
+          }
+          try { return hljs.highlightAuto(str).value; } catch {}
         }
-        try { return hljs.highlightAuto(str).value; } catch {}
-        return '';
+        return md.utils.escapeHtml(str);
       },
     });
 

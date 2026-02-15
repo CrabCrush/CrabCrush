@@ -184,7 +184,7 @@ DEC-011 定义 V1 不含工具调用；V1 发布后 Phase 2a 已部分实现（�
 ### 下一步（Phase 2a 续）
 - [ ] 内置工具：浏览器截图/填表、文件操作、数据库查询（2a.3）
 - [ ] Skills 框架（2a.4）
-- [ ] 人格化与工作区（借鉴 OpenClaw，2a.5，DEC-032）
+- [ ] 人格化与工作区（借鉴 OpenClaw，2a.5，DEC-032；实现参考 `docs/OPENCLAW_ANALYSIS.md`）
 - [ ] 飞书渠道（2a.6）
 - [ ] 钉钉 Block Streaming（借鉴 OpenClaw，DEC-031）
 - 详见 `docs/ROADMAP.md` Phase 2a

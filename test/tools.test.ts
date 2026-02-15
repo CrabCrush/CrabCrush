@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { ToolRegistry } from '../src/tools/registry.js';
 import { getCurrentTimeTool } from '../src/tools/builtin/time.js';
 import { browseUrlTool } from '../src/tools/builtin/browser.js';
+import { searchWebTool } from '../src/tools/builtin/search.js';
 import type { Tool, ToolContext, ToolResult } from '../src/tools/types.js';
 
 // 创建测试用的 mock 工具
@@ -164,5 +165,26 @@ describe('browse_url tool', () => {
     expect(result.content).toContain('【标题】');
     expect(result.content).toContain('【正文】');
     expect(result.content.toLowerCase()).toContain('example');
+  }, 25_000);
+});
+
+describe('search_web tool', () => {
+  it('rejects empty query', async () => {
+    const ctx: ToolContext = { senderId: 'owner-1', isOwner: true, sessionId: 'sess-1' };
+    const result = await searchWebTool.execute({}, ctx);
+    expect(result.success).toBe(false);
+  });
+
+  it('is an owner tool', () => {
+    expect(searchWebTool.permission).toBe('owner');
+  });
+
+  // 需要 Chromium + 网络，auto 模式会依次尝试 Google/Bing/百度
+  it.skip('searches when given valid query', async () => {
+    const ctx: ToolContext = { senderId: 'owner-1', isOwner: true, sessionId: 'sess-1' };
+    const result = await searchWebTool.execute({ query: 'CrabCrush' }, ctx);
+    expect(result.success).toBe(true);
+    expect(result.content).toMatch(/Google搜索|Bing搜索|百度搜索/);
+    expect(result.content).toContain('CrabCrush');
   }, 25_000);
 });

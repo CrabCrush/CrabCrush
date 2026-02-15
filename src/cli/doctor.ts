@@ -44,6 +44,9 @@ export async function runDoctor(): Promise<void> {
     if (apiResult) results.push(apiResult);
   }
 
+  // 5. Playwright Chromium（browse_url、search_web 依赖）
+  results.push(await checkPlaywrightChromium());
+
   // 输出结果
   console.log('\n─── 诊断结果 ───\n');
   let hasError = false;
@@ -215,6 +218,41 @@ async function checkApiConnectivity(config: CrabCrushConfig): Promise<CheckResul
       name: `API 连通性 (${providerName})`,
       ok: false,
       message: `无法连接: ${message}`,
+    };
+  }
+}
+
+/**
+ * 检查 Playwright Chromium 是否已安装（browse_url、search_web 依赖）
+ */
+async function checkPlaywrightChromium(): Promise<CheckResult> {
+  try {
+    const { chromium } = await import('playwright');
+    const browser = await chromium.launch({ headless: true });
+    await browser.close();
+    return {
+      name: 'Playwright Chromium',
+      ok: true,
+      message: '已安装（browse_url、search_web 可用）',
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (
+      msg.includes('Executable') ||
+      msg.includes('browserType') ||
+      msg.includes('__dirlock') ||
+      msg.includes('playwright')
+    ) {
+      return {
+        name: 'Playwright Chromium',
+        ok: false,
+        message: '未安装。运行 npx playwright install chromium 后 browse_url、search_web 可用',
+      };
+    }
+    return {
+      name: 'Playwright Chromium',
+      ok: false,
+      message: `检查失败: ${msg}`,
     };
   }
 }

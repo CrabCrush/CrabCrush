@@ -8,11 +8,19 @@
 
 ### 2026-02-14
 
-#### feat: 内置工具 browse_url（Phase 2a.3 浏览器控制）
+#### chore: 规划与体验优化
 
-AI 可以抓取网页内容，回答「这个链接讲了什么」「帮我总结这个页面」等问题。
+- **ROADMAP**：标注 Phase 2a 里程碑达成（search_web 已实现）
+- **crabcrush doctor**：新增 Playwright Chromium 检测，未安装时提示 `npx playwright install chromium`
+- **README**：快速开始中补充 Playwright 可选安装说明
+- **ARCHITECTURE**：标注当前实现为简化版，目标架构可逐步演进
+
+#### feat: 内置工具 browse_url + search_web（Phase 2a.3 浏览器控制）
+
+AI 可以抓取网页内容、搜索网络，回答「这个链接讲了什么」「帮我搜一下 XX」等问题。
 
 - **browse_url**：打开 URL，提取标题和正文，返回给模型（默认截断 8000 字符）
+- **search_web**：智能多引擎搜索（Google → Bing → 百度），有代理时优先 Google；`CRABCRUSH_SEARCH_ENGINE=google|bing|baidu` 可强制指定
 - 权限：owner（操作本地浏览器，DEC-026）
 - 依赖：Playwright + Chromium，首次使用需执行 `npx playwright install chromium`
 - 超时：15 秒

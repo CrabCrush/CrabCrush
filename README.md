@@ -55,6 +55,12 @@ cd CrabCrush
 pnpm install
 ```
 
+> **可选**：若要用 browse_url（抓取网页）、search_web（搜索）工具，需先安装 Chromium：
+> ```bash
+> npx playwright install chromium
+> ```
+> 运行 `crabcrush doctor` 可检查是否已安装。
+
 ### 2. 配置模型
 
 复制示例配置并填入你的 API Key：
@@ -81,6 +87,10 @@ models:
 pnpm dev
 ```
 
+> **端口被占用？** 若提示 18790 端口已被占用，可先结束旧进程：
+> - Windows: `netstat -ano | findstr :18790` 查 PID，再 `taskkill /PID <pid> /F`
+> - macOS/Linux: `lsof -i :18790` 查 PID，再 `kill <pid>`
+
 看到以下输出就说明启动成功：
 
 ```
@@ -94,8 +104,15 @@ pnpm dev
 打开浏览器访问 **http://127.0.0.1:18790**，即可与 AI 对话。
 
 > 想接入钉钉？查看 [钉钉机器人接入指南](./guide/dingtalk-setup.md)（Stream 模式，不需要公网 IP）
->
-> 想用网页抓取（让 AI 总结链接内容）？首次使用需执行 `npx playwright install chromium`
+
+### 常用命令
+
+| 命令 | 说明 |
+|------|------|
+| `pnpm dev` | 启动服务（开发模式，热重载） |
+| `pnpm start` | 启动服务（需先 `pnpm build`） |
+| `pnpm doctor` | 自检诊断（Node、配置、API、Playwright 等） |
+| `pnpm onboard` | 向导式创建配置 |
 
 ---
 

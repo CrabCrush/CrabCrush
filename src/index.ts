@@ -11,7 +11,7 @@ import { ModelRouter } from './models/router.js';
 import { AgentRuntime } from './agent/runtime.js';
 import { ConversationStore } from './storage/database.js';
 import { ToolRegistry } from './tools/registry.js';
-import { builtinTools } from './tools/builtin/index.js';
+import { getBuiltinTools } from './tools/builtin/index.js';
 import { startGateway } from './gateway/server.js';
 import { DingTalkAdapter } from './channels/dingtalk.js';
 import { runDoctor } from './cli/doctor.js';
@@ -77,7 +77,7 @@ program
 
     // 初始化工具系统
     const toolRegistry = new ToolRegistry();
-    for (const tool of builtinTools) {
+    for (const tool of getBuiltinTools(config)) {
       toolRegistry.register(tool);
     }
 

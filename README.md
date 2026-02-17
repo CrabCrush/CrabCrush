@@ -55,11 +55,14 @@ cd CrabCrush
 pnpm install
 ```
 
-> **可选**：若要用 browse_url（抓取网页）、search_web（搜索）工具，需先安装 Chromium：
+> **可选**：若要用 browse_url（抓取网页）、search_web（搜索）工具，需先安装 Chromium。read_file 可读取 `~/.crabcrush` 下的文件（如 `workspace/notes.md`）。
 > ```bash
 > npx playwright install chromium
 > ```
 > 运行 `crabcrush doctor` 可检查是否已安装。
+> 依赖取舍说明（better-sqlite3、Playwright）见 [DEC-033](./docs/DECISIONS.md)。
+>
+> **read_file 根目录**：默认仅允许读取 `~/.crabcrush`。若要读取其他目录，可在 `crabcrush.yaml` 中配置 `tools.fileBase: /path/to/your/dir`，或设置环境变量 `CRABCRUSH_FILE_BASE`（环境变量优先）。
 >
 > **说明**：WebChat 所需的前端库（markdown-it、highlight.js）已随仓库放在 `public/vendor/`，克隆即用，无需安装或运行任何脚本。
 

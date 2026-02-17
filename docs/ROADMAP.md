@@ -7,6 +7,16 @@ Phase 0 (当前)   Phase 1        Phase 2a       Phase 2b       Phase 2c       P
 规划与脚手架 →  核心引擎  →  工具+飞书  →  渠道+生活  →  管理+部署  →  高级能力  →  生态建设
 ```
 
+### 版本与里程碑对应
+
+| 版本 | 里程碑 | 对应 Phase |
+|------|--------|------------|
+| v0.1.0 | V1 发布：WebChat + 钉钉纯对话 | Phase 0 + Phase 1 ✅ |
+| v0.2.0 | 工具就绪：browse_url、search_web、read_file | Phase 2a.0–2a.3（部分） |
+| v0.3.0 | Skills + 人格化 + 飞书 | Phase 2a.4–2a.6 |
+| v0.4.0 | 渠道扩展 + 生活工具 | Phase 2b |
+| v0.5.0 | 管理界面 + Docker 部署 | Phase 2c |
+
 ---
 
 ## Phase 0：规划与脚手架
@@ -114,6 +124,7 @@ Phase 0 (当前)   Phase 1        Phase 2a       Phase 2b       Phase 2c       P
 
 > 目标：从"能聊天"进化到"能干活"。工具能力优先于新渠道（详见 DEC-027）。
 > 核心逻辑：一个能帮你操作浏览器、查资料的钉钉机器人，比一个只能聊天的飞书机器人更有价值。
+> **版本节奏**：2a.0–2a.3 → v0.2.0；2a.4–2a.6 → v0.3.0；2a.7 可并入 v0.3.0 或 v0.4.0。
 
 ### 2a.0 快速胜利（小改动、大价值）
 - [x] WebChat Token 认证（当前任何人知道 IP+端口就能访问，安全隐患）
@@ -139,15 +150,68 @@ Phase 0 (当前)   Phase 1        Phase 2a       Phase 2b       Phase 2c       P
 - [x] Owner 认证机制（`ownerIds` 配置，未配置时默认所有人是 owner）
 - [ ] 代码执行沙箱选型决策（Docker vs 隔离进程 vs worker_threads）
 - [ ] 数据安全防线（DEC-028）：工具结果脱敏、列白名单、确认机制
+- [ ] **运行时权限请求**（Cursor 式）：执行前主动询问「是否允许访问 XX」「是否允许安装 XX」（详见下方设计）
+
+### 运行时权限请求：Cursor 式动态确认（2a.2 扩展）
+
+> 目标：类似 Cursor，在执行敏感操作前主动询问用户，支持「访问 XX 盘」「安装 XX 软件」等动态场景。区别于静态 confirmRequired（工具级），这是**请求级**的运行时确认。
+
+**与现有机制的关系**：
+
+| 机制 | 粒度 | 时机 | 示例 |
+|------|------|------|------|
+| **confirmRequired** | 工具级（静态） | 执行前 | write_file、run_command 等高危工具一律确认 |
+| **运行时权限请求** | 请求级（动态） | 执行前 | read_file 要访问 D 盘（超出 fileBase）→ 询问「是否允许本次访问 D:\？」 |
+| **可操作错误消息** | 失败后补救 | 执行失败后 | Chromium 未安装 → 展示「一键安装」按钮 |
+
+**设计要点**：
+
+1. **触发条件**：工具执行前检测到需额外授权（如路径超出 fileBase、首次安装依赖、执行外部命令等），返回 `{ type: 'permission_request', action: string, message: string, params?: object }`，暂停执行
+2. **用户响应**：WebChat 弹窗/按钮「允许」「拒绝」；钉钉/飞书 交互卡片
+3. **授权范围**：支持「仅本次」与「加入白名单」（可选，如将 D:\ 加入 fileBase 或临时允许列表）
+4. **渠道兼容**：与「可操作错误消息」复用交互卡片能力；本地模式无 publicUrl 时降级为文本说明 + 用户回复「允许」后继续
+
+**典型场景**：
+
+- 访问新路径：read_file 请求 `D:/work/notes.md`，fileBase 仅含 `~/.crabcrush` → 询问「是否允许访问 D:\work\？」
+- 安装依赖：browse_url 需 Chromium → 询问「是否允许安装 Chromium？」（与 2a.3 一键安装结合）
+- 执行命令：run_command 请求执行 `npm install xxx` → 询问「是否允许执行该命令？」
+
+**实现时机**：2a.2 确认机制（confirmRequired）实现后，扩展为统一的权限请求框架；2a.3 可操作错误消息可复用同一套 UI/协议。
 
 ### 2a.3 内置工具（按实用价值排序）
 - [x] 浏览器控制（Playwright Core：抓取网页内容 `browse_url`）
 - [ ] 浏览器控制（续）：截图、填表
-- [ ] 文件操作（读写本地文件、文档解析）
+- [x] 文件操作：`read_file`（读取 ~/.crabcrush 下文本文件，默认截断 8000 字符）
+- [ ] 文件操作（续）：write_file、文档解析
   - **设计时必读**：DEC-030 — 文件单独存、消息存引用；大内容不塞进 `messages.content`；可选的消息长度限制与自动清理
 - [ ] 数据库查询（MySQL/PostgreSQL/SQLite，默认只读，列白名单）
 - [ ] 代码执行（沙箱内运行 Python/JS/Shell）
 - [x] 网页搜索（`search_web`：Google/Bing/百度 智能选择）
+- [ ] **工具错误「可操作」化**：Chromium 未安装时支持一键安装（详见下方「可操作错误消息」设计）
+
+### 可操作错误消息：Chromium 一键安装（2a.3）
+
+> 背景：browse_url、search_web 失败时提示「Chromium 未安装，请执行 npx playwright install chromium」，用户需手动复制粘贴。目标：支持「一键安装」按钮，降低操作门槛。
+
+**分层设计**：
+
+| 层级 | 职责 |
+|------|------|
+| **工具层** | 返回结构化错误：`{ type: 'actionable_error', action: 'install_chromium', message: '...', command: 'npx playwright install chromium' }` |
+| **Gateway** | 新增 `POST /api/install-chromium`：执行 `npx playwright install chromium`，需 token 或仅 localhost；支持 SSE 流式返回安装进度 |
+| **渠道适配** | 各渠道按能力渲染：有按钮则展示按钮，否则降级为纯文本 + 命令 |
+
+**各渠道兼容策略**：
+
+| 渠道 | 策略 | 说明 |
+|------|------|------|
+| **WebChat** | 按钮「一键安装」→ 调用 Gateway API | 同源请求，直接可用；安装中显示进度 |
+| **钉钉** | 配置了 `publicUrl` 时：ActionCard 按钮「一键安装」→ 打开 `{publicUrl}/api/install-chromium?token=xxx`（GET 触发，返回 HTML 页显示进度） | 渠道模式下用户手机可访问公网 URL，点击即触发服务端安装 |
+| **钉钉** | 本地模式（无 publicUrl） | 仅展示命令文本，用户需在运行 CrabCrush 的机器上执行 |
+| **飞书 / 企微** | 同钉钉 | 使用各平台交互卡片（interactive message），按钮打开 URL |
+
+**配置**：`gateway.publicUrl`（ARCHITECTURE 已有）用于生成「一键安装」链接；未配置时钉钉/飞书等仅展示命令。
 
 ### 2a.4 Skills 框架（详见 DEC-029）
 
@@ -301,6 +365,15 @@ Phase 0 (当前)   Phase 1        Phase 2a       Phase 2b       Phase 2c       P
 - **性能优化**：响应延迟、内存占用、并发能力
 - **国际化**：虽然主打中文，但保持 i18n 能力
 - **无障碍**：Web UI 符合 WCAG 标准
+
+### 运维与安全待办（Phase 2 优先）
+
+| 项目 | 现状 | 规划 |
+|------|------|------|
+| **Gateway 请求限流** | 无 | 防止单 IP 滥用，Phase 2a 后期 |
+| **持久化日志** | 仅控制台 | DEC-024：`~/.crabcrush/logs/`，Phase 2 |
+| **危险操作确认** | confirmRequired 为 TODO | 2a.2：confirmRequired + 运行时权限请求（Cursor 式） |
+| **WebSocket 连接数限制** | 无 | 防止资源耗尽，Phase 2 |
 
 ---
 

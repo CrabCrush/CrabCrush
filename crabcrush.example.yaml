@@ -44,6 +44,12 @@ agent:
   # 发给 API 的最大消息条数（1 轮对话 = 2 条消息，默认 40 = 最近 20 轮），越大记忆越长，但 token 消耗越多（= 越贵）
   # contextWindow: 40
 
+# 工具配置
+# tools:
+#   # read_file 可读取的根目录，默认 ~/.crabcrush
+#   # 环境变量 CRABCRUSH_FILE_BASE 优先
+#   fileBase: /path/to/your/dir
+
 # Owner 用户 ID（只有 owner 能触发本地操作类工具）
 # 不配置时默认所有用户都是 owner（适合个人使用）
 # 放到群聊时建议配置，防止其他人操控你的电脑

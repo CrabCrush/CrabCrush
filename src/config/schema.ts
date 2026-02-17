@@ -92,6 +92,12 @@ export const configSchema = z.object({
   /** Owner 用户 ID（只有 owner 能触发本地操作类工具，详见 DEC-026） */
   ownerIds: z.array(z.string()).default([]),
 
+  /** 工具相关配置 */
+  tools: z.object({
+    /** read_file 可读取的根目录，默认 ~/.crabcrush。环境变量 CRABCRUSH_FILE_BASE 优先 */
+    fileBase: z.string().optional(),
+  }).optional(),
+
   channels: channelsSchema,
 });
 

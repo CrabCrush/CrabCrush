@@ -76,6 +76,12 @@ export function loadConfig(configPath?: string): CrabCrushConfig {
     }
   }
 
+  // 工具配置：环境变量 CRABCRUSH_FILE_BASE 优先于 YAML
+  if (process.env.CRABCRUSH_FILE_BASE) {
+    if (!rawConfig.tools) rawConfig.tools = {};
+    rawConfig.tools.fileBase = process.env.CRABCRUSH_FILE_BASE;
+  }
+
   // 钉钉渠道环境变量
   if (process.env.CRABCRUSH_DINGTALK_CLIENT_ID || process.env.CRABCRUSH_DINGTALK_CLIENT_SECRET) {
     if (!rawConfig.channels) rawConfig.channels = {};

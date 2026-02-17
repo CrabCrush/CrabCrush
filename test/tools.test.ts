@@ -1,8 +1,12 @@
 import { describe, it, expect } from 'vitest';
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { ToolRegistry } from '../src/tools/registry.js';
 import { getCurrentTimeTool } from '../src/tools/builtin/time.js';
 import { browseUrlTool } from '../src/tools/builtin/browser.js';
 import { searchWebTool } from '../src/tools/builtin/search.js';
+import { readFileTool } from '../src/tools/builtin/file.js';
 import type { Tool, ToolContext, ToolResult } from '../src/tools/types.js';
 
 // 创建测试用的 mock 工具
@@ -187,4 +191,53 @@ describe('search_web tool', () => {
     expect(result.content).toMatch(/Google搜索|Bing搜索|百度搜索/);
     expect(result.content).toContain('CrabCrush');
   }, 25_000);
+});
+
+describe('read_file tool', () => {
+  const ctx: ToolContext = { senderId: 'owner-1', isOwner: true, sessionId: 'sess-1' };
+
+  it('rejects empty path', async () => {
+    const result = await readFileTool.execute({}, ctx);
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects path traversal', async () => {
+    const result = await readFileTool.execute({ path: '../../../etc/passwd' }, ctx);
+    expect(result.success).toBe(false);
+    expect(result.content).toContain('不安全');
+  });
+
+  it('rejects disallowed file types', async () => {
+    const result = await readFileTool.execute({ path: 'workspace/image.png' }, ctx);
+    expect(result.success).toBe(false);
+    expect(result.content).toContain('不支持');
+  });
+
+  it('returns file not found for non-existent file', async () => {
+    const result = await readFileTool.execute({ path: 'workspace/nonexistent.md' }, ctx);
+    expect(result.success).toBe(false);
+    expect(result.content).toContain('不存在');
+  });
+
+  it('reads file content when file exists', async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'crabcrush-readfile-'));
+    const origBase = process.env.CRABCRUSH_FILE_BASE;
+    process.env.CRABCRUSH_FILE_BASE = tmpDir;
+
+    try {
+      mkdirSync(join(tmpDir, 'workspace'), { recursive: true });
+      writeFileSync(join(tmpDir, 'workspace', 'notes.md'), '# Hello\n\nThis is a test.');
+      const result = await readFileTool.execute({ path: 'workspace/notes.md' }, ctx);
+      expect(result.success).toBe(true);
+      expect(result.content).toContain('Hello');
+      expect(result.content).toContain('This is a test');
+    } finally {
+      process.env.CRABCRUSH_FILE_BASE = origBase;
+      rmSync(tmpDir, { recursive: true });
+    }
+  });
+
+  it('is an owner tool', () => {
+    expect(readFileTool.permission).toBe('owner');
+  });
 });

@@ -391,6 +391,20 @@
 
 ---
 
+## DEC-033：关键依赖取舍 — better-sqlite3 / Playwright
+
+- **决策**：当前使用 **better-sqlite3** 和 **Playwright Core**，已知取舍如下。
+- **better-sqlite3**：
+  - **取舍**：需 node-gyp 编译，Windows 上若缺少构建工具（Visual Studio Build Tools）易安装失败
+  - **替代方案**：若用户环境无法编译，可考虑 `sql.js`（纯 JS，无需编译，但性能略低）或 `libsql`（Turso 出品，预编译二进制）
+  - **当前策略**：保持 better-sqlite3，文档中说明安装要求；若社区反馈安装问题多，再评估迁移
+- **Playwright Core**：
+  - **取舍**：`search_web` 需真实浏览器渲染（JS 执行、反爬检测），cheerio 无法替代；`browse_url` 理论上可考虑 cheerio，但多数站点为 SPA，无 JS 则内容不完整
+  - **替代方案**：无等效替代；若用户不想装 Chromium，可禁用 browse_url/search_web 工具
+  - **当前策略**：保持 Playwright，README 中说明可选安装（`npx playwright install chromium`）
+
+---
+
 *以下 DEC 编号已合并入其他条目，保留编号供旧引用跳转：*
 
 - **DEC-007** → 已合并入 DEC-002（单包项目、Node.js 版本）

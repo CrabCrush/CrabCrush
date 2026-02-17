@@ -6,7 +6,29 @@
 
 ## [未发布]
 
+### 2026-02-13
+
+#### feat: read_file 根目录可配置
+
+- **tools.fileBase**：YAML 配置项，可指定 read_file 可读取的根目录（默认 ~/.crabcrush）
+- **CRABCRUSH_FILE_BASE**：环境变量优先于 YAML
+- 错误提示显示实际 base 路径（如 ~/.crabcrush 或 ~/Documents）
+- README、crabcrush.example.yaml 补充配置说明
+
+#### docs: 规划与文档更新
+
+- **ROADMAP**：Phase 2a 版本节奏（v0.2.0–v0.5.0 对应表）；技术债务表（限流、日志、confirmRequired、WS 连接数）
+- **可操作错误消息**：Chromium 未安装时一键安装设计（WebChat/钉钉/飞书兼容）
+- **运行时权限请求**：Cursor 式动态确认（访问新路径、安装软件、执行命令前主动询问）
+- **DEC-033**：关键依赖取舍（better-sqlite3、Playwright）及替代方案
+
 ### 2026-02-15
+
+#### feat: 内置工具 read_file（Phase 2a.3 文件操作）
+
+- **read_file**：读取 ~/.crabcrush 下的文本文件（.md/.txt/.json/.yaml 等）
+- 权限：owner（DEC-026）；安全：路径限制、拒绝 .. 穿越、扩展名白名单
+- 截断：默认 8000 字符（DEC-030）；`CRABCRUSH_FILE_BASE` 可覆盖根目录
 
 #### fix: WebChat 前端本地化（解决国内 CDN 超时）
 

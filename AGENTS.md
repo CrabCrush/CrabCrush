@@ -32,7 +32,7 @@
 | 关键决策（为什么这么选） | `docs/DECISIONS.md` | 引用 DEC 编号，不复制细节 |
 | 当前进度（做到哪了） | `AGENTS.md` 的"当前阶段"部分 | 不在别处维护进度 |
 | 开发计划（下一步做什么） | `docs/ROADMAP.md` | AGENTS.md 只放最近的"下一步" |
-| 技术架构（接口怎么设计） | `docs/ARCHITECTURE.md` | 不在别处复制接口定义 |
+| 技术架构（模块职责、部署模式） | `docs/ARCHITECTURE.md` | 接口定义在 src/ 代码中 |
 | 项目愿景（为什么做这个） | `docs/VISION.md` | 不在别处复制愿景描述 |
 
 **写文档的原则：最少够用。** 能用代码注释说清楚的，不写进文档。只有跨模块的重大决策才记入 DECISIONS.md。

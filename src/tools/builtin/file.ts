@@ -1,13 +1,13 @@
 /**
- * 内置工具：读取本地文件
+ * 内置工具：文件操作（读取、列出/查找）
  *
- * 用途：让 AI 能读取用户指定的文件内容，回答「这个文件写了什么」「帮我总结这个文档」等问题
+ * 用途：让 AI 能读取、查找用户文件，回答「这个文件写了什么」「帮我找一下 XXX 的笔记」等问题
  * 权限：owner（本地文件访问，DEC-026）
- * 安全：仅允许读取配置的根目录下的文件，拒绝路径穿越
+ * 安全：仅允许访问配置的根目录下的文件，拒绝路径穿越
  * 设计：DEC-030 — 大内容截断，不塞满上下文
  */
 
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { resolve, join, relative } from 'node:path';
 import { homedir } from 'node:os';
 import type { Tool, ToolContext, ToolResult } from '../types.js';
@@ -127,3 +127,117 @@ export function createReadFileTool(config?: { fileBase?: string }): Tool {
 
 /** 默认 read_file 工具（使用默认根目录，用于无 config 场景如测试） */
 export const readFileTool = createReadFileTool();
+
+/** 简单 glob 匹配：*.md / notes* / *report* */
+function matchPattern(name: string, pattern: string): boolean {
+  if (!pattern || pattern === '*') return true;
+  const parts = pattern.split('*');
+  if (parts.length === 1) return name === pattern;
+  if (parts.length === 2) {
+    const [p1, p2] = parts;
+    if (p1 && p2) return name.startsWith(p1) && name.endsWith(p2);
+    if (p1) return name.startsWith(p1);
+    if (p2) return name.endsWith(p2);
+    return true;
+  }
+  // *a*b* 等复杂模式：简单包含检查
+  const required = parts.filter(Boolean);
+  return required.every((p) => name.includes(p));
+}
+
+/**
+ * 创建 list_files 工具（列出/查找文件）
+ * 与 read_file 共用根目录配置，先 list_files 查找再用 read_file 读取
+ */
+export function createListFilesTool(config?: { fileBase?: string }): Tool {
+  const MAX_RESULTS = 50;
+  const MAX_DEPTH = 3;
+
+  return {
+    definition: {
+      name: 'list_files',
+      description: '列出或查找目录下的文件。当用户说「帮我找一下」「有哪些文件」「列出 XXX 目录」时先调用此工具查找，再用 read_file 读取具体文件。支持按名称模式过滤（如 *.md 找所有 Markdown）。',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: {
+            type: 'string',
+            description: '相对于根目录的目录路径，如 workspace 或 . 表示根目录',
+            default: '.',
+          },
+          pattern: {
+            type: 'string',
+            description: '可选，文件名过滤模式。如 *.md 找 Markdown，notes* 找以 notes 开头的文件',
+          },
+          recursive: {
+            type: 'boolean',
+            description: '是否递归子目录，默认 false',
+            default: false,
+          },
+        },
+        required: [],
+      },
+    },
+    permission: 'owner',
+    confirmRequired: false,
+
+    async execute(args: Record<string, unknown>, _context: ToolContext): Promise<ToolResult> {
+      const pathArg = ((args.path as string) || '.').trim().replace(/^\/+/, '') || '.';
+      const pattern = (args.pattern as string)?.trim() || '';
+      const recursive = Boolean(args.recursive);
+
+      const basePath = getFileBasePath(config);
+      const baseDisplay = basePath.startsWith(homedir()) ? '~' + basePath.slice(homedir().length) : basePath;
+
+      if (!isPathSafe(basePath, pathArg)) {
+        return { success: false, content: `路径不安全，仅允许访问 ${baseDisplay} 下的文件` };
+      }
+
+      const dirPath = resolve(basePath, pathArg);
+      const results: string[] = [];
+
+      async function scan(dir: string, relPrefix: string, depth: number): Promise<void> {
+        if (depth > MAX_DEPTH || results.length >= MAX_RESULTS) return;
+        const entries = await readdir(dir, { withFileTypes: true });
+        for (const e of entries) {
+          if (results.length >= MAX_RESULTS) break;
+          if (e.name.startsWith('.')) continue;
+          const relPath = relPrefix ? `${relPrefix}/${e.name}` : e.name;
+          if (e.isFile()) {
+            if (matchPattern(e.name, pattern)) results.push(relPath);
+          } else if (e.isDirectory()) {
+            if (recursive) {
+              await scan(resolve(dir, e.name), relPath, depth + 1);
+            } else {
+              results.push(relPath + '/'); // 标记为目录，便于用户继续 list_files
+            }
+          }
+        }
+      }
+
+      try {
+        await scan(dirPath, pathArg === '.' ? '' : pathArg, 0);
+        if (results.length === 0) {
+          return {
+            success: true,
+            content: `目录 ${pathArg || '.'} 下${pattern ? `匹配 "${pattern}" 的` : ''}文件为空。可用 read_file 读取已知路径。`,
+          };
+        }
+        const list = results.slice(0, MAX_RESULTS).join('\n');
+        const more = results.length >= MAX_RESULTS ? `\n（已截断，最多 ${MAX_RESULTS} 个）` : '';
+        return {
+          success: true,
+          content: `找到 ${results.length} 个文件：\n\n${list}${more}\n\n使用 read_file 读取具体文件，如 read_file(path: "workspace/notes.md")`,
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes('ENOENT')) return { success: false, content: `目录不存在：${pathArg}` };
+        if (msg.includes('ENOTDIR')) return { success: false, content: `路径不是目录：${pathArg}` };
+        if (msg.includes('EACCES')) return { success: false, content: `无读取权限：${pathArg}` };
+        return { success: false, content: `列出失败：${msg}` };
+      }
+    },
+  };
+}
+
+export const listFilesTool = createListFilesTool();

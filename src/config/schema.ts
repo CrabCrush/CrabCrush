@@ -77,14 +77,19 @@ export const configSchema = z.object({
   agent: z.object({
     model: z.string().default('deepseek-chat'),
     fallbackModels: z.array(z.string()).default([]),
-    systemPrompt: z.string().default('你是 CrabCrush，一个友好的 AI 助手。请用中文回复。'),
+    systemPrompt: z.string().default(
+      '你是 CrabCrush，一个友好的 AI 助手。请用中文回复。\n' +
+      '调用工具后，必须用自然语言总结工具结果并给出建议，不要只让用户去调用另一个工具。例如 list_files 找到文件后，应简要列出关键文件并询问用户想查看哪个，而不是只说「用 read_file 读取」。',
+    ),
     maxTokens: z.number().int().default(4096),
     /** 发给 API 的最大消息条数（1 轮 = 2 条，默认 40 条 = 20 轮） */
     contextWindow: z.number().int().min(2).max(200).default(40),
   }).default({
     model: 'deepseek-chat',
     fallbackModels: [],
-    systemPrompt: '你是 CrabCrush，一个友好的 AI 助手。请用中文回复。',
+    systemPrompt:
+      '你是 CrabCrush，一个友好的 AI 助手。请用中文回复。\n' +
+      '调用工具后，必须用自然语言总结工具结果并给出建议，不要只让用户去调用另一个工具。例如 list_files 找到文件后，应简要列出关键文件并询问用户想查看哪个，而不是只说「用 read_file 读取」。',
     maxTokens: 4096,
     contextWindow: 40,
   }),

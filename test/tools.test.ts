@@ -6,7 +6,7 @@ import { ToolRegistry } from '../src/tools/registry.js';
 import { getCurrentTimeTool } from '../src/tools/builtin/time.js';
 import { browseUrlTool } from '../src/tools/builtin/browser.js';
 import { searchWebTool } from '../src/tools/builtin/search.js';
-import { readFileTool } from '../src/tools/builtin/file.js';
+import { readFileTool, listFilesTool } from '../src/tools/builtin/file.js';
 import type { Tool, ToolContext, ToolResult } from '../src/tools/types.js';
 
 // 创建测试用的 mock 工具
@@ -239,5 +239,53 @@ describe('read_file tool', () => {
 
   it('is an owner tool', () => {
     expect(readFileTool.permission).toBe('owner');
+  });
+});
+
+describe('list_files tool', () => {
+  const ctx: ToolContext = { senderId: 'owner-1', isOwner: true, sessionId: 'sess-1' };
+
+  it('lists files in directory', async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'crabcrush-listfiles-'));
+    const origBase = process.env.CRABCRUSH_FILE_BASE;
+    process.env.CRABCRUSH_FILE_BASE = tmpDir;
+
+    try {
+      mkdirSync(join(tmpDir, 'workspace'), { recursive: true });
+      writeFileSync(join(tmpDir, 'workspace', 'notes.md'), '# Notes');
+      writeFileSync(join(tmpDir, 'workspace', 'todo.txt'), 'todo');
+      const result = await listFilesTool.execute({ path: 'workspace' }, ctx);
+      expect(result.success).toBe(true);
+      expect(result.content).toContain('notes.md');
+      expect(result.content).toContain('todo.txt');
+    } finally {
+      process.env.CRABCRUSH_FILE_BASE = origBase;
+      rmSync(tmpDir, { recursive: true });
+    }
+  });
+
+  it('filters by pattern', async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'crabcrush-listfiles-'));
+    const origBase = process.env.CRABCRUSH_FILE_BASE;
+    process.env.CRABCRUSH_FILE_BASE = tmpDir;
+
+    try {
+      mkdirSync(join(tmpDir, 'ws'), { recursive: true });
+      writeFileSync(join(tmpDir, 'ws', 'a.md'), '');
+      writeFileSync(join(tmpDir, 'ws', 'b.txt'), '');
+      const result = await listFilesTool.execute({ path: 'ws', pattern: '*.md' }, ctx);
+      expect(result.success).toBe(true);
+      expect(result.content).toContain('a.md');
+      expect(result.content).not.toContain('b.txt');
+    } finally {
+      process.env.CRABCRUSH_FILE_BASE = origBase;
+      rmSync(tmpDir, { recursive: true });
+    }
+  });
+
+  it('rejects path traversal', async () => {
+    const result = await listFilesTool.execute({ path: '../../../etc' }, ctx);
+    expect(result.success).toBe(false);
+    expect(result.content).toContain('不安全');
   });
 });

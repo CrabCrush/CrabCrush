@@ -8,6 +8,22 @@
 
 ### 2026-02-13
 
+#### fix: WebChat 历史记录与停止按钮
+
+- **历史记录**：sessionId 优先从 URL 的 `?session=xxx` 读取，收到 session 时写入 URL；避免多 Tab 共享 localStorage 时被覆盖，导致刷新后加载错误会话
+- **停止按钮**：chunk / done 处理器增加 `isStreaming` 检查，忽略 stop 后迟到的 chunk，避免产生孤立消息；避免重复处理 done
+
+#### fix: 工具调用后自然语言总结
+
+- **问题**：list_files 等工具调用后，模型只输出「用 read_file 读取」等引用说明，缺少自然语言总结
+- **做法**：优化默认 system prompt，引导模型在工具调用后用自然语言总结结果并给出建议，例如 list_files 后应简要列出关键文件并询问用户想查看哪个
+
+#### docs: ARCHITECTURE.md 精简
+
+- 550 行 → 74 行：删除大段 TypeScript 接口代码（实现时写在 src/ 中）
+- 保留：系统全景图、模块职责、部署模式、数据存储、OpenClaw 对比
+- AGENTS.md：信息权威来源表更新「接口定义在代码中」
+
 #### feat: read_file 根目录可配置
 
 - **tools.fileBase**：YAML 配置项，可指定 read_file 可读取的根目录（默认 ~/.crabcrush）

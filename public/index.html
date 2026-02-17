@@ -282,9 +282,14 @@
     #send:disabled { opacity: 0.4; cursor: not-allowed; }
     #stop-btn {
       background: #dc2626;
-      display: none;
+      min-width: 4rem;
     }
-    #stop-btn:hover { background: #b91c1c; }
+    #stop-btn:hover:not(.inactive) { background: #b91c1c; }
+    #stop-btn.inactive { opacity: 0.4; cursor: default; }
+    #input-area.streaming #stop-btn:not(.inactive) {
+      animation: stop-pulse 1.5s ease-in-out infinite;
+    }
+    @keyframes stop-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(220,38,38,0.4); } 50% { box-shadow: 0 0 0 6px rgba(220,38,38,0); } }
 
     @media (max-width: 600px) {
       .message { max-width: 92%; font-size: 0.9rem; }
@@ -308,10 +313,10 @@
       <p>做你的虾兵蟹将 —— 随时为你服务<br>输入消息开始对话吧</p>
     </div>
   </div>
-  <div id="input-area">
-    <textarea id="input" placeholder="输入消息... (Enter 发送, Shift+Enter 换行)" rows="1"></textarea>
+  <div id="input-area" class="">
+    <textarea id="input" placeholder="输入消息... (Enter 发送, Shift+Enter 换行, Esc 停止)" rows="1"></textarea>
     <button id="send" class="action-btn" disabled>发送</button>
-    <button id="stop-btn" class="action-btn">停止</button>
+    <button id="stop-btn" class="action-btn inactive" title="生成时可点击立即停止">停止</button>
   </div>
 
   <!-- 本地 /vendor 优先（不依赖外网 CDN）；失败时回退到国内 npmmirror -->
@@ -359,7 +364,9 @@
     let currentBotMsg = null;
     let rawContent = '';          // 当前 bot 消息的原始文本
     let isStreaming = false;
-    let sessionId = localStorage.getItem('crabcrush_session') || null;
+    // sessionId 优先从 URL 读取，避免多 Tab 时 localStorage 被其他 Tab 覆盖导致刷新后加载错误会话
+    const urlParamsInit = new URLSearchParams(location.search);
+    let sessionId = urlParamsInit.get('session') || localStorage.getItem('crabcrush_session') || null;
     let welcomeShown = true;
     let renderRAF = null;         // requestAnimationFrame ID，用于节流渲染
 
@@ -388,6 +395,7 @@
       ws.onclose = () => {
         statusEl.textContent = '连接断开，3秒后重连...';
         statusEl.className = 'error';
+        if (isStreaming) finishStreaming(); // 连接断开时重置 UI
         sendBtn.disabled = true;
         setTimeout(connect, 3000);
       };
@@ -403,6 +411,10 @@
         if (msg.type === 'session') {
           sessionId = msg.sessionId;
           localStorage.setItem('crabcrush_session', sessionId);
+          // 写入 URL，刷新时优先从 URL 恢复，避免多 Tab 覆盖导致加载错误会话
+          const url = new URL(location.href);
+          url.searchParams.set('session', sessionId);
+          history.replaceState(null, '', url.toString());
 
         } else if (msg.type === 'history') {
           // 服务器返回历史消息，渲染到聊天区域
@@ -437,6 +449,7 @@
           messagesEl.scrollTop = messagesEl.scrollHeight;
 
         } else if (msg.type === 'chunk') {
+          if (!isStreaming) return; // 忽略 stop 后迟到的 chunk，避免产生孤立消息
           if (!currentBotMsg) {
             currentBotMsg = addMessage('assistant', '');
           }
@@ -444,6 +457,7 @@
           scheduleRender();
 
         } else if (msg.type === 'done') {
+          if (!isStreaming) return; // 避免重复处理（stop 后可能收到多处 done）
           // 最终渲染（确保完整内容正确显示）
           if (currentBotMsg) {
             cancelAnimationFrame(renderRAF);
@@ -550,20 +564,21 @@
       isStreaming = true;
       rawContent = '';
       currentBotMsg = null;
-      sendBtn.style.display = 'none';
-      stopBtn.style.display = '';
+      sendBtn.disabled = true;
+      stopBtn.classList.remove('inactive');
       inputEl.disabled = true;
+      document.getElementById('input-area').classList.add('streaming');
     }
 
     function finishStreaming() {
       isStreaming = false;
       rawContent = '';
       currentBotMsg = null;
-      sendBtn.style.display = '';
-      stopBtn.style.display = 'none';
       sendBtn.disabled = false;
+      stopBtn.classList.add('inactive');
       inputEl.disabled = false;
       inputEl.focus();
+      document.getElementById('input-area').classList.remove('streaming');
     }
 
     // ── 复制代码 ──
@@ -584,6 +599,14 @@
     // ── 事件绑定 ──
     sendBtn.addEventListener('click', send);
     stopBtn.addEventListener('click', stopGeneration);
+
+    // Esc 停止：全局监听，不依赖 input 焦点
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && isStreaming) {
+        e.preventDefault();
+        stopGeneration();
+      }
+    });
 
     inputEl.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {

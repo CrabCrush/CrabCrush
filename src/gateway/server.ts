@@ -114,10 +114,13 @@ export async function startGateway(options: GatewayOptions = {}) {
             return;
           }
 
-          // 中断生成
+          // 中断生成：立即通知客户端结束，避免客户端一直等待
           if (msg.type === 'stop') {
             currentAbort?.abort();
             currentAbort = null;
+            if (socket.readyState === 1) {
+              socket.send(JSON.stringify({ type: 'done' }));
+            }
             return;
           }
 

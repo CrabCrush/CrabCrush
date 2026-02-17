@@ -149,7 +149,9 @@ models:
 
 agent:
   model: ${model}
-  systemPrompt: "你是 CrabCrush，一个友好的 AI 助手。请用中文回复。"
+  systemPrompt: |
+    你是 CrabCrush，一个友好的 AI 助手。请用中文回复。
+    调用工具后，必须用自然语言总结工具结果并给出建议，不要只让用户去调用另一个工具。例如 list_files 找到文件后，应简要列出关键文件并询问用户想查看哪个，而不是只说「用 read_file 读取」。
   maxTokens: 4096
 ${dingtalkConfig}`;
 }

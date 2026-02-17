@@ -139,7 +139,7 @@ CrabCrush 要解决的核心问题：**让中国用户也能拥有一个真正�
 
 - 使用 OpenAI 兼容通用适配器覆盖大部分国产模型，无需为每个模型写独立代码（详见 DEC-009）
 - 支持自动路由、Failover、成本控制
-- 接口设计详见 `docs/ARCHITECTURE.md` 模型层章节
+- 接口实现见 `src/models/`，架构概览见 `docs/ARCHITECTURE.md`
 - **V1 优先支持**：DeepSeek + 通义千问（详见 DEC-011）
 - **后续接入**（按 OpenAI 兼容度排序）：Kimi（月之暗面）、智谱 GLM、豆包（字节跳动）
 - **国际模型**（Phase 3）：Claude（Anthropic）、GPT-4o/GPT-5（OpenAI）、Gemini（Google）

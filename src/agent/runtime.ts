@@ -49,6 +49,32 @@ export interface ToolCallEvent {
 /** 最大工具调用轮次（防止无限循环） */
 const MAX_TOOL_ROUNDS = 5;
 
+/** 工具调用持久化格式：供 loadHistory 后前端解析渲染 */
+const TOOL_BLOCK_START = '__TOOL_CALL__\n';
+const TOOL_BLOCK_END = '\n__END__';
+
+function serializeToolBlock(t: { name: string; args: Record<string, unknown>; result: string; success: boolean }): string {
+  return TOOL_BLOCK_START + JSON.stringify(t) + TOOL_BLOCK_END;
+}
+
+export function parseToolBlocks(content: string): Array<{ name: string; args: Record<string, unknown>; result: string; success: boolean }> | null {
+  if (!content.startsWith(TOOL_BLOCK_START)) return null;
+  const blocks: Array<{ name: string; args: Record<string, unknown>; result: string; success: boolean }> = [];
+  let rest = content;
+  while (rest.startsWith(TOOL_BLOCK_START)) {
+    const endIdx = rest.indexOf(TOOL_BLOCK_END);
+    if (endIdx < 0) break;
+    const json = rest.slice(TOOL_BLOCK_START.length, endIdx);
+    try {
+      blocks.push(JSON.parse(json));
+    } catch {
+      // 单条解析失败跳过
+    }
+    rest = rest.slice(endIdx + TOOL_BLOCK_END.length).replace(/^\n+/, '');
+  }
+  return blocks.length > 0 ? blocks : null;
+}
+
 export class AgentRuntime {
   private sessions = new Map<string, Session>();
   private router: ModelRouter;
@@ -81,7 +107,9 @@ export class AgentRuntime {
       if (this.store) {
         this.store.ensureConversation(sessionId, channel, senderId);
         const stored = this.store.getRecentMessages(sessionId, this.contextWindow);
-        messages = stored.map(m => ({ role: m.role as ChatMessage['role'], content: m.content }));
+        messages = stored
+          .filter((m) => !(m.role === 'assistant' && m.content.startsWith(TOOL_BLOCK_START)))
+          .map((m) => ({ role: m.role as ChatMessage['role'], content: m.content }));
       }
 
       session = {
@@ -116,8 +144,9 @@ export class AgentRuntime {
     session.messages.push({ role: 'user', content: userMessage });
     this.store?.saveMessage(sessionId, 'user', userMessage);
 
-    // 工具调用循环
+      // 工具调用循环
     let toolRound = 0;
+    const accumulatedToolCalls: Array<{ name: string; args: Record<string, unknown>; result: string; success: boolean }> = [];
 
     while (toolRound <= MAX_TOOL_ROUNDS) {
       // 滑动窗口
@@ -182,6 +211,11 @@ export class AgentRuntime {
       if (!toolCalls || toolCalls.length === 0) {
         if (fullContent) {
           session.messages.push({ role: 'assistant', content: fullContent });
+          // 若有工具调用，先持久化工具块供刷新后展示
+          if (accumulatedToolCalls.length > 0) {
+            const toolBlockContent = accumulatedToolCalls.map((t) => serializeToolBlock(t)).join('\n');
+            this.store?.saveMessage(sessionId, 'assistant', toolBlockContent);
+          }
           this.store?.saveMessage(sessionId, 'assistant', fullContent);
         }
         break;
@@ -237,6 +271,13 @@ export class AgentRuntime {
           success: result.success,
         };
 
+        accumulatedToolCalls.push({
+          name: tc.function.name,
+          args,
+          result: result.content,
+          success: result.success,
+        });
+
         // 把工具结果加入消息历史，供下一轮模型调用
         const toolMsg: ChatMessage = {
           role: 'tool',
@@ -266,15 +307,30 @@ export class AgentRuntime {
   }
 
   /**
-   * 获取会话的历史消息（用于 WebChat 加载历史）
-   * @param full 为 true 时返回全部消息（用于刷新后恢复），否则返回最近 contextWindow 条
+   * 获取会话列表（用于 WebChat 多会话切换）
    */
-  getHistory(sessionId: string, full = false): ChatMessage[] {
+  listConversations(limit = 50, offset = 0, channel = 'webchat'): Array<{ id: string; title: string; lastActiveAt: number; messageCount: number }> {
+    if (!this.store) return [];
+    return this.store.listConversations(limit, offset, channel).map((c) => ({
+      id: c.id,
+      title: c.title || '（无标题）',
+      lastActiveAt: c.lastActiveAt,
+      messageCount: c.messageCount,
+    }));
+  }
+
+  /**
+   * 获取会话的历史消息（用于 WebChat 加载历史）
+   * @param limit 限制条数；未传或 0 时返回全部（用于导出等）
+   * @param offset 跳过前 N 条最晚的，用于分页加载更早的消息
+   */
+  getHistory(sessionId: string, limit?: number, offset?: number): ChatMessage[] {
     if (this.store) {
-      const stored = full
-        ? this.store.getAllMessages(sessionId)
-        : this.store.getRecentMessages(sessionId, this.contextWindow);
-      return stored.map(m => ({ role: m.role as ChatMessage['role'], content: m.content }));
+      if (limit && limit > 0) {
+        const stored = this.store.getRecentMessages(sessionId, limit, offset ?? 0);
+        return stored.map(m => ({ role: m.role as ChatMessage['role'], content: m.content }));
+      }
+      return this.store.getAllMessages(sessionId).map(m => ({ role: m.role as ChatMessage['role'], content: m.content }));
     }
     const session = this.sessions.get(sessionId);
     return session?.messages ?? [];

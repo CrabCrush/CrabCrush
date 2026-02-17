@@ -181,7 +181,10 @@ export const searchWebTool: Tool = {
 
         if (out.results && out.results.length > 0) {
           const formatted = out.results
-            .map((r, i) => `${i + 1}. ${r.title}\n   ${r.link}\n   ${r.snippet || ''}`)
+            .map((r, i) => {
+              const snippet = (r.snippet || '').trim();
+              return `${i + 1}. ${r.title}\n   摘要: ${snippet || '（无）'}\n   链接: ${r.link}`;
+            })
             .join('\n\n');
           return {
             success: true,

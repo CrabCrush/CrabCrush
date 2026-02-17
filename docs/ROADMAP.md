@@ -136,7 +136,9 @@ Phase 0 (当前)   Phase 1        Phase 2a       Phase 2b       Phase 2c       P
 
 - [x] SQLite 存储对话历史（`~/.crabcrush/data/conversations.db`）
 - [x] Gateway 重启后恢复历史会话（WebChat 重连时 loadHistory）
-- [ ] WebChat 显示历史对话列表（多会话切换）
+- [x] WebChat 显示历史对话列表（多会话切换，侧边栏点击切换）
+- [x] WebChat 消息历史分页（滚动到顶加载更早消息，limit 100 + offset）
+- [x] WebChat 会话列表分页（加载更多）
 - [ ] 对话搜索（按关键词 / 时间范围）
 - [ ] 对话导出（JSON / Markdown）
 - [x] 上下文窗口管理（替代当前"全发"策略）：
@@ -183,7 +185,9 @@ Phase 0 (当前)   Phase 1        Phase 2a       Phase 2b       Phase 2c       P
 - [x] 浏览器控制（Playwright Core：抓取网页内容 `browse_url`）
 - [ ] 浏览器控制（续）：截图、填表
 - [x] 文件操作：`read_file`（读取 ~/.crabcrush 下文本文件，默认截断 8000 字符）
-- [ ] 文件操作（续）：write_file、文档解析
+- [x] 文件操作：`list_files`（查找/列出文件，支持 path、pattern、recursive）
+- [x] 文件操作：`write_file`（写入 fileBase 下文件，自动创建父目录；confirmRequired 待 2a.2 实现）
+- [ ] 文件操作（续）：文档解析
   - **设计时必读**：DEC-030 — 文件单独存、消息存引用；大内容不塞进 `messages.content`；可选的消息长度限制与自动清理
 - [ ] 数据库查询（MySQL/PostgreSQL/SQLite，默认只读，列白名单）
 - [ ] 代码执行（沙箱内运行 Python/JS/Shell）
@@ -374,6 +378,15 @@ Phase 0 (当前)   Phase 1        Phase 2a       Phase 2b       Phase 2c       P
 | **持久化日志** | 仅控制台 | DEC-024：`~/.crabcrush/logs/`，Phase 2 |
 | **危险操作确认** | confirmRequired 为 TODO | 2a.2：confirmRequired + 运行时权限请求（Cursor 式） |
 | **WebSocket 连接数限制** | 无 | 防止资源耗尽，Phase 2 |
+
+---
+
+## 已知问题（待后续解决）
+
+| 问题 | 现象 | 期望行为 | 备注 |
+|------|------|----------|------|
+| **工具调用刷新后丢失** | search_web 等工具调用后，页面刷新时工具块（调用过程、结果引用）不展示 | 刷新后应恢复展示工具调用块 | 已尝试 __TOOL_CALL__ 持久化方案，用户反馈仍未解决 |
+| **search_web 工具调用体验** | 用户说「搜下明天天气」时，模型直接调用 search_web，查完才问地点；且只返回搜索引擎默认前几条，缺乏思考 | 提案式沟通：先问「请问您想查询哪个城市的天气？」再查；查前应思考搜索词（城市+日期+天气） | 涉及模型行为引导；或等 2b.2 天气专用工具 |
 
 ---
 

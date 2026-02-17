@@ -117,18 +117,17 @@ export class ConversationStore {
 
   /**
    * 获取会话的最近 N 条消息（用于构建 API 上下文）
+   * @param offset 跳过前 N 条最晚的，用于分页加载更早的消息
    */
-  getRecentMessages(conversationId: string, limit = 40): StoredMessage[] {
-    // limit 是消息条数（一轮 = 2 条：user + assistant），默认 40 条 = 最近 20 轮
+  getRecentMessages(conversationId: string, limit = 40, offset = 0): StoredMessage[] {
     const rows = this.db.prepare(`
       SELECT id, conversation_id as conversationId, role, content, created_at as createdAt
       FROM messages
       WHERE conversation_id = ?
       ORDER BY created_at DESC
-      LIMIT ?
-    `).all(conversationId, limit) as StoredMessage[];
+      LIMIT ? OFFSET ?
+    `).all(conversationId, limit, offset) as StoredMessage[];
 
-    // 反转为时间正序
     return rows.reverse();
   }
 
@@ -146,19 +145,24 @@ export class ConversationStore {
 
   /**
    * 获取会话列表（按最后活跃时间倒序）
+   * @param channel 可选，筛选渠道（如 'webchat'）
    */
-  listConversations(limit = 50, offset = 0): Conversation[] {
-    return this.db.prepare(`
+  listConversations(limit = 50, offset = 0, channel?: string): Conversation[] {
+    const where = channel ? 'WHERE c.channel = ?' : '';
+    const params = channel ? [channel, limit, offset] : [limit, offset];
+    const sql = `
       SELECT
         c.id, c.channel, c.sender_id as senderId, c.title,
         c.created_at as createdAt, c.last_active_at as lastActiveAt,
         COUNT(m.id) as messageCount
       FROM conversations c
       LEFT JOIN messages m ON m.conversation_id = c.id
+      ${where}
       GROUP BY c.id
       ORDER BY c.last_active_at DESC
       LIMIT ? OFFSET ?
-    `).all(limit, offset) as Conversation[];
+    `;
+    return this.db.prepare(sql).all(...params) as Conversation[];
   }
 
   /**

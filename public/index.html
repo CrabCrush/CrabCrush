@@ -40,9 +40,77 @@
       justify-content: center;
       gap: 0.5rem;
       flex-shrink: 0;
+      position: relative;
     }
     header h1 { font-size: 1.1rem; font-weight: 600; }
     .subtitle { font-size: 0.72rem; color: var(--text-muted); }
+    #sessions-btn {
+      position: absolute;
+      left: 1rem;
+      padding: 0.35rem 0.7rem;
+      font-size: 0.85rem;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text-muted);
+      cursor: pointer;
+    }
+    #sessions-btn:hover { color: var(--text); border-color: var(--text-muted); }
+    /* 会话侧边栏 */
+    #sessions-sidebar {
+      position: fixed;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 260px;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      z-index: 100;
+      transform: translateX(-100%);
+      transition: transform 0.2s ease;
+      display: flex;
+      flex-direction: column;
+    }
+    #sessions-sidebar.open { transform: translateX(0); }
+    #sessions-sidebar-header {
+      padding: 0.8rem 1rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    #sessions-sidebar-header h3 { font-size: 0.95rem; }
+    #sessions-new { font-size: 0.8rem; padding: 0.25rem 0.5rem; background: var(--border); border: none; border-radius: 4px; color: var(--text); cursor: pointer; }
+    #sessions-new:hover { background: var(--text-muted); color: white; }
+    #sessions-close { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 1.2rem; }
+    #sessions-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0.5rem;
+    }
+    .session-item {
+      padding: 0.6rem 0.8rem;
+      margin-bottom: 0.25rem;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .session-item:hover { background: var(--border); }
+    .session-item.active { background: var(--user-bg); color: white; }
+    .session-item .meta { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.2rem; }
+    #sessions-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.3);
+      z-index: 99;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
+    }
+    #sessions-overlay.visible { opacity: 1; pointer-events: auto; }
 
     /* Status bar */
     #status {
@@ -95,6 +163,27 @@
       border: 1px solid #4a2020;
       white-space: pre-wrap;
     }
+
+    .messages-load-more {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      text-align: center;
+      padding: 0.6rem;
+      margin-bottom: 0.5rem;
+      background: var(--bg);
+    }
+    .messages-load-more button {
+      font-size: 0.85rem;
+      padding: 0.3rem 0.8rem;
+      background: var(--border);
+      border: none;
+      border-radius: 6px;
+      color: var(--text-muted);
+      cursor: pointer;
+    }
+    .messages-load-more button:hover:not(:disabled) { background: var(--text-muted); color: white; }
+    .messages-load-more button:disabled { opacity: 0.6; cursor: not-allowed; }
 
     /* Streaming cursor */
     .streaming-cursor {
@@ -298,7 +387,22 @@
   </style>
 </head>
 <body>
+  <div id="sessions-overlay"></div>
+  <div id="sessions-sidebar">
+    <div id="sessions-sidebar-header">
+      <h3>会话列表</h3>
+      <div style="display:flex;gap:0.3rem;align-items:center">
+        <button id="sessions-new" type="button" title="新建会话">新建</button>
+        <button id="sessions-close" type="button" title="关闭">×</button>
+      </div>
+    </div>
+    <div id="sessions-list"></div>
+    <div id="sessions-more" style="padding:0.5rem;text-align:center;display:none">
+      <button id="sessions-load-more" type="button" style="font-size:0.85rem;padding:0.3rem 0.6rem;background:var(--border);border:none;border-radius:4px;color:var(--text-muted);cursor:pointer">加载更多</button>
+    </div>
+  </div>
   <header>
+    <button id="sessions-btn" type="button" title="会话列表">会话</button>
     <span style="font-size:1.3rem">🦀</span>
     <div>
       <h1>CrabCrush</h1>
@@ -353,6 +457,101 @@
       return `<div class="code-header"><span>${lang}</span><button class="copy-btn" onclick="copyCode(this)">复制</button></div><pre><code class="hljs language-${lang}">${highlighted}</code></pre>`;
     };
 
+    function escapeHtml(s) {
+      const div = document.createElement('div');
+      div.textContent = s;
+      return div.innerHTML;
+    }
+
+    const TOOL_PREFIX = '__TOOL_CALL__\n';
+    function renderMessagesToFragment(messages) {
+      const fragment = document.createDocumentFragment();
+      for (const m of messages) {
+        try {
+          if (m.role === 'user' || m.role === 'error') {
+            const el = document.createElement('div');
+            el.className = `message ${m.role}`;
+            el.textContent = m.content || '';
+            fragment.appendChild(el);
+          } else if (m.role === 'assistant' && m.content) {
+            if (m.content.startsWith(TOOL_PREFIX)) {
+              let s = m.content;
+              while (s.startsWith(TOOL_PREFIX)) {
+                const endIdx = s.indexOf('\n__END__');
+                if (endIdx < 0) break;
+                try {
+                  const t = JSON.parse(s.slice(TOOL_PREFIX.length, endIdx));
+                  const toolEl = document.createElement('div');
+                  toolEl.className = 'tool-call';
+                  const icon = t.success ? '✅' : '❌';
+                  const safeResult = escapeHtml(String(t.result || ''));
+                  toolEl.innerHTML = `<div class="tool-header">${icon} 调用工具: <strong>${escapeHtml(t.name || '')}</strong></div><div class="tool-args">参数: <code>${escapeHtml(JSON.stringify(t.args || {}))}</code></div><div class="tool-result" style="white-space:pre-wrap">结果: ${safeResult}</div>`;
+                  fragment.appendChild(toolEl);
+                } catch (_) {}
+                s = s.slice(endIdx + 8).replace(/^\s+/, '');
+              }
+            } else {
+              const el = document.createElement('div');
+              el.className = 'message assistant';
+              el.innerHTML = md.render(m.content);
+              fragment.appendChild(el);
+            }
+          }
+        } catch (_err) {}
+      }
+      return fragment;
+    }
+
+    let loadingOlderHistory = false;
+    function loadOlderHistory() {
+      if (!sessionId || !ws || ws.readyState !== 1 || loadingOlderHistory || !hasMoreHistory) return;
+      loadingOlderHistory = true;
+      const btn = document.querySelector('#messages-load-more button');
+      if (btn) { btn.disabled = true; btn.textContent = '加载中...'; }
+      ws.send(JSON.stringify({ type: 'loadHistory', sessionId, limit: HISTORY_PAGE_SIZE, offset: historyOffset }));
+    }
+
+    let sessionsListOffset = 0;
+    let historyOffset = 0;
+    let hasMoreHistory = false;
+    const HISTORY_PAGE_SIZE = 100;
+
+    function openSessionsSidebar() {
+      document.getElementById('sessions-sidebar').classList.add('open');
+      document.getElementById('sessions-overlay').classList.add('visible');
+      sessionsListOffset = 0;
+      if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'listConversations', offset: 0 }));
+    }
+
+    function closeSessionsSidebar() {
+      document.getElementById('sessions-sidebar').classList.remove('open');
+      document.getElementById('sessions-overlay').classList.remove('visible');
+    }
+
+    function switchSession(id) {
+      if (id === sessionId) { closeSessionsSidebar(); return; }
+      sessionId = id;
+      localStorage.setItem('crabcrush_session', sessionId);
+      const url = new URL(location.href);
+      url.searchParams.set('session', sessionId);
+      history.replaceState(null, '', url.toString());
+      if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'loadHistory', sessionId, limit: 100 }));
+      closeSessionsSidebar();
+    }
+
+    function newSession() {
+      sessionId = null;
+      localStorage.removeItem('crabcrush_session');
+      const url = new URL(location.href);
+      url.searchParams.delete('session');
+      history.replaceState(null, '', url.toString());
+      messagesEl.innerHTML = '<div class="welcome"><div class="emoji">🦀</div><h2>你好！我是 CrabCrush</h2><p>做你的虾兵蟹将 —— 随时为你服务<br>输入消息开始对话吧</p></div>';
+      welcomeShown = true;
+      // 通知服务端重置 sessionId，否则下一条消息会发到旧会话
+      if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'newSession' }));
+      closeSessionsSidebar();
+    }
+
     // ── DOM 元素 ──
     const messagesEl = document.getElementById('messages');
     const inputEl = document.getElementById('input');
@@ -391,7 +590,7 @@
         const sessionFromUrl = urlParams.get('session');
         if (sessionFromUrl) sessionId = sessionFromUrl;
         if (sessionId) {
-          ws.send(JSON.stringify({ type: 'loadHistory', sessionId }));
+          ws.send(JSON.stringify({ type: 'loadHistory', sessionId, limit: 100 }));
         }
       };
 
@@ -419,8 +618,28 @@
           url.searchParams.set('session', sessionId);
           history.replaceState(null, '', url.toString());
 
+        } else if (msg.type === 'conversations') {
+          const listEl = document.getElementById('sessions-list');
+          const moreEl = document.getElementById('sessions-more');
+          if (!listEl) return;
+          const append = (msg.offset || 0) > 0;
+          if (!append) listEl.innerHTML = '';
+          if (msg.list && msg.list.length > 0) {
+            for (const c of msg.list) {
+              const el = document.createElement('div');
+              el.className = 'session-item' + (c.id === sessionId ? ' active' : '');
+              const title = (c.title || '（无标题）').slice(0, 40);
+              el.innerHTML = `<div>${escapeHtml(title)}</div><div class="meta">${c.messageCount} 条消息</div>`;
+              el.onclick = () => switchSession(c.id);
+              listEl.appendChild(el);
+            }
+            sessionsListOffset = (msg.offset || 0) + msg.list.length;
+          }
+          if (!append && (!msg.list || msg.list.length === 0)) {
+            listEl.innerHTML = '<div style="padding:1rem;color:var(--text-muted);font-size:0.9rem">暂无会话</div>';
+          }
+          if (moreEl) moreEl.style.display = (msg.list && msg.list.length >= 50) ? 'block' : 'none';
         } else if (msg.type === 'history') {
-          // 同步 sessionId 与 URL，确保刷新时能正确恢复
           if (msg.sessionId) {
             sessionId = msg.sessionId;
             localStorage.setItem('crabcrush_session', sessionId);
@@ -428,39 +647,52 @@
             url.searchParams.set('session', sessionId);
             history.replaceState(null, '', url.toString());
           }
-          // 服务器返回历史消息，渲染到聊天区域（始终清空再渲染，避免重连时追加导致错乱）
-          if (msg.messages && msg.messages.length > 0) {
+          hasMoreHistory = Boolean(msg.hasMore);
+          const append = (msg.offset || 0) > 0;
+          const fragment = renderMessagesToFragment(msg.messages || []);
+          if (!append) {
             messagesEl.innerHTML = '';
             welcomeShown = false;
-            const fragment = document.createDocumentFragment();
-            for (const m of msg.messages) {
-              try {
-                const el = document.createElement('div');
-                el.className = `message ${m.role}`;
-                if (m.role === 'user' || m.role === 'error') {
-                  el.textContent = m.content || '';
-                } else if (m.role === 'assistant' && m.content) {
-                  el.innerHTML = md.render(m.content);
-                  // fence 渲染器已内置复制按钮，无需 addCopyButton
-                }
-                fragment.appendChild(el);
-              } catch (_err) {
-                // 单条渲染失败不影响其余消息
-              }
+            if (fragment.childNodes.length > 0) {
+              messagesEl.appendChild(fragment);
+              historyOffset = msg.messages.length;
+            } else {
+              messagesEl.innerHTML = '<div class="welcome"><div class="emoji">🦀</div><h2>暂无消息</h2><p>输入消息开始对话</p></div>';
+              welcomeShown = true;
             }
-            messagesEl.appendChild(fragment);
+            if (hasMoreHistory) {
+              const moreBtn = document.createElement('div');
+              moreBtn.id = 'messages-load-more';
+              moreBtn.className = 'messages-load-more';
+              moreBtn.innerHTML = '<button type="button">加载更早的消息</button>';
+              moreBtn.onclick = loadOlderHistory;
+              messagesEl.insertBefore(moreBtn, messagesEl.firstChild);
+            }
             messagesEl.scrollTop = messagesEl.scrollHeight;
+          } else {
+            const loadMoreEl = document.getElementById('messages-load-more');
+            const insertBefore = loadMoreEl ? loadMoreEl.nextSibling : messagesEl.firstChild;
+            const prevScrollHeight = messagesEl.scrollHeight;
+            const prevScrollTop = messagesEl.scrollTop;
+            messagesEl.insertBefore(fragment, insertBefore);
+            historyOffset += msg.messages.length;
+            loadingOlderHistory = false;
+            if (!hasMoreHistory && loadMoreEl) loadMoreEl.remove();
+            else {
+              const btn = loadMoreEl?.querySelector('button');
+              if (btn) { btn.disabled = false; btn.textContent = '加载更早的消息'; }
+            }
+            messagesEl.scrollTop = prevScrollTop + (messagesEl.scrollHeight - prevScrollHeight);
           }
-
         } else if (msg.type === 'tool_call') {
           // 工具调用事件 — 在聊天区域显示调用过程
           const toolEl = document.createElement('div');
           toolEl.className = 'tool-call';
           const statusIcon = msg.success ? '✅' : '❌';
           toolEl.innerHTML = `
-            <div class="tool-header">${statusIcon} 调用工具: <strong>${msg.name}</strong></div>
-            <div class="tool-args">参数: <code>${JSON.stringify(msg.args)}</code></div>
-            <div class="tool-result">结果: ${msg.result}</div>
+            <div class="tool-header">${statusIcon} 调用工具: <strong>${escapeHtml(msg.name || '')}</strong></div>
+            <div class="tool-args">参数: <code>${escapeHtml(JSON.stringify(msg.args || {}))}</code></div>
+            <div class="tool-result" style="white-space:pre-wrap">结果: ${escapeHtml(String(msg.result || ''))}</div>
           `;
           messagesEl.appendChild(toolEl);
           messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -616,6 +848,20 @@
     // ── 事件绑定 ──
     sendBtn.addEventListener('click', send);
     stopBtn.addEventListener('click', stopGeneration);
+    document.getElementById('sessions-btn').addEventListener('click', openSessionsSidebar);
+    document.getElementById('sessions-close').addEventListener('click', closeSessionsSidebar);
+    document.getElementById('sessions-new').addEventListener('click', newSession);
+    document.getElementById('sessions-load-more').addEventListener('click', () => {
+      if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'listConversations', offset: sessionsListOffset }));
+    });
+
+    // 消息区滚动到顶时自动加载更早的消息
+    messagesEl.addEventListener('scroll', () => {
+      if (hasMoreHistory && !loadingOlderHistory && messagesEl.scrollTop < 80) {
+        loadOlderHistory();
+      }
+    });
+    document.getElementById('sessions-overlay').addEventListener('click', closeSessionsSidebar);
 
     // Esc 停止：全局监听，不依赖 input 焦点
     document.addEventListener('keydown', (e) => {

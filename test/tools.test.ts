@@ -6,7 +6,7 @@ import { ToolRegistry } from '../src/tools/registry.js';
 import { getCurrentTimeTool } from '../src/tools/builtin/time.js';
 import { browseUrlTool } from '../src/tools/builtin/browser.js';
 import { searchWebTool } from '../src/tools/builtin/search.js';
-import { readFileTool, listFilesTool } from '../src/tools/builtin/file.js';
+import { readFileTool, listFilesTool, writeFileTool } from '../src/tools/builtin/file.js';
 import type { Tool, ToolContext, ToolResult } from '../src/tools/types.js';
 
 // 创建测试用的 mock 工具
@@ -287,5 +287,58 @@ describe('list_files tool', () => {
     const result = await listFilesTool.execute({ path: '../../../etc' }, ctx);
     expect(result.success).toBe(false);
     expect(result.content).toContain('不安全');
+  });
+});
+
+describe('write_file tool', () => {
+  const ctx: ToolContext = { senderId: 'owner-1', isOwner: true, sessionId: 'sess-1' };
+
+  it('rejects missing path', async () => {
+    const result = await writeFileTool.execute({ content: 'hello' }, ctx);
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects missing content', async () => {
+    const result = await writeFileTool.execute({ path: 'test.txt' }, ctx);
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects path traversal', async () => {
+    const result = await writeFileTool.execute({ path: '../../../etc/passwd', content: 'x' }, ctx);
+    expect(result.success).toBe(false);
+    expect(result.content).toContain('不安全');
+  });
+
+  it('rejects disallowed file types', async () => {
+    const result = await writeFileTool.execute({ path: 'workspace/image.png', content: 'x' }, ctx);
+    expect(result.success).toBe(false);
+    expect(result.content).toContain('不支持');
+  });
+
+  it('writes file and creates parent dirs', async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'crabcrush-writefile-'));
+    const origBase = process.env.CRABCRUSH_FILE_BASE;
+    process.env.CRABCRUSH_FILE_BASE = tmpDir;
+
+    try {
+      const result = await writeFileTool.execute(
+        { path: 'workspace/sub/notes.md', content: '# Hello\n\nWritten by AI.' },
+        ctx,
+      );
+      expect(result.success).toBe(true);
+      expect(result.content).toContain('已写入');
+      const read = await readFileTool.execute({ path: 'workspace/sub/notes.md' }, ctx);
+      expect(read.success).toBe(true);
+      expect(read.content).toContain('Hello');
+      expect(read.content).toContain('Written by AI');
+    } finally {
+      process.env.CRABCRUSH_FILE_BASE = origBase;
+      rmSync(tmpDir, { recursive: true });
+    }
+  });
+
+  it('is an owner tool and requires confirm', () => {
+    expect(writeFileTool.permission).toBe('owner');
+    expect(writeFileTool.confirmRequired).toBe(true);
   });
 });

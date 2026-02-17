@@ -118,4 +118,16 @@ describe('ConversationStore', () => {
     expect(store.getAllMessages('sess-1')[0].content).toBe('消息 A');
     expect(store.getAllMessages('sess-2')[0].content).toBe('消息 B');
   });
+
+  it('listConversations filters by channel', () => {
+    store.ensureConversation('s1', 'webchat');
+    store.saveMessage('s1', 'user', 'WebChat 消息');
+    store.ensureConversation('s2', 'dingtalk');
+    store.saveMessage('s2', 'user', '钉钉消息');
+
+    expect(store.listConversations(50, 0, 'webchat')).toHaveLength(1);
+    expect(store.listConversations(50, 0, 'webchat')[0].id).toBe('s1');
+    expect(store.listConversations(50, 0, 'dingtalk')).toHaveLength(1);
+    expect(store.listConversations(50, 0, 'dingtalk')[0].id).toBe('s2');
+  });
 });

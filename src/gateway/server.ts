@@ -103,14 +103,33 @@ export async function startGateway(options: GatewayOptions = {}) {
             sessionId = msg.sessionId;
           }
 
-          // 客户端请求加载历史（刷新后恢复用 full=true 获取全部消息）
+          // 客户端请求新建会话（点击「新建」后，服务端重置 sessionId，下一条 chat 将创建新会话）
+          if (msg.type === 'newSession') {
+            sessionId = `webchat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+            return;
+          }
+
+          // 客户端请求加载历史（limit/offset 分页，offset>0 时返回更早的消息用于「加载更多」）
           if (msg.type === 'loadHistory') {
-            const history = agent.getHistory(sessionId, true);
+            const limit = typeof msg.limit === 'number' ? msg.limit : 100;
+            const offset = typeof msg.offset === 'number' ? msg.offset : 0;
+            const history = agent.getHistory(sessionId, limit, offset);
+            const hasMore = history.length >= limit;
             socket.send(JSON.stringify({
               type: 'history',
               sessionId,
               messages: history,
+              offset,
+              hasMore,
             }));
+            return;
+          }
+
+          // 客户端请求会话列表（支持 offset 分页）
+          if (msg.type === 'listConversations') {
+            const offset = typeof msg.offset === 'number' ? msg.offset : 0;
+            const list = agent.listConversations(50, offset, 'webchat');
+            socket.send(JSON.stringify({ type: 'conversations', list, offset }));
             return;
           }
 
@@ -159,7 +178,13 @@ export async function startGateway(options: GatewayOptions = {}) {
                 // 模型文本 chunk
                 const chunk = event as ChatChunk;
                 if (chunk.done) {
-                  // 计算费用估算
+                  // 若有 toolCalls 表示工具调用中，不发送 done，避免客户端提前结束 streaming 导致后续自然语言回复不展示
+                  if (chunk.toolCalls && chunk.toolCalls.length > 0) {
+                    if (chunk.content) {
+                      socket.send(JSON.stringify({ type: 'chunk', content: chunk.content }));
+                    }
+                    continue;
+                  }
                   let costInfo: { formatted: string } | null = null;
                   if (chunk.usage && chunk.model) {
                     costInfo = estimateCost(
@@ -168,7 +193,6 @@ export async function startGateway(options: GatewayOptions = {}) {
                       chunk.usage.completionTokens,
                     );
                   }
-
                   socket.send(JSON.stringify({
                     type: 'done',
                     usage: chunk.usage,

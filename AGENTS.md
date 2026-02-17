@@ -15,7 +15,7 @@
 
 ### AI 行为准则（最重要）
 
-项目作者是初学者，决策可能不符合最佳实践。AI 助手必须遵守：
+项目作者不是大佬，决策可能不符合最佳实践。AI 助手必须遵守：
 
 1. **质疑不合理的决策**：如果用户的指令或已有决策存在明显问题（性能隐患、架构缺陷、社区反模式等），**必须先解释问题并提出替代方案**，等用户确认后再执行。不要默默执行一个有问题的指令。
 2. **解释取舍**：做技术选择时，说清楚"选 A 的好处是什么、代价是什么"，不要只列好处。
@@ -112,7 +112,7 @@ crabcrush/
 │   │       ├── time.ts    # get_current_time
 │   │       ├── browser.ts # browse_url
 │   │       ├── search.ts  # search_web
-│   │       └── file.ts    # read_file
+│   │       └── file.ts    # read_file, list_files, write_file
 │   ├── cli/               # CLI 子命令
 │   │   ├── onboard.ts     # 向导式配置
 │   │   └── doctor.ts      # 自检诊断
@@ -172,7 +172,7 @@ DEC-011 定义 V1 不含工具调用；V1 发布后 Phase 2a 已部分实现（�
 - [x] WebChat：Markdown 渲染 + 代码高亮 + 停止生成
 - [x] 钉钉渠道：Stream 模式 + Markdown 卡片 + 会话隔离
 - [x] CLI：`crabcrush start` / `onboard` / `doctor`
-- [x] 28 条决策记录 + 完整文档体系
+- [x] 30+ 条决策记录 + 完整文档体系
 
 ### Phase 2a 已完成（部分）
 - [x] WebChat Token 认证（2a.0）
@@ -182,9 +182,17 @@ DEC-011 定义 V1 不含工具调用；V1 发布后 Phase 2a 已部分实现（�
 - [x] 内置工具 `browse_url`（2a.3 抓取网页内容）
 - [x] 内置工具 `search_web`（2a.3 智能多引擎：Google/Bing/百度）
 - [x] 内置工具 `read_file`（2a.3 读取 ~/.crabcrush 下文件）
+- [x] 内置工具 `list_files`（2a.3 查找/列出文件，支持 path/pattern/recursive）
+- [x] 内置工具 `write_file`（2a.3 写入 ~/.crabcrush 下文件，confirmRequired 待 2a.2 实现）
+- [x] WebChat 历史对话列表（2a.1 多会话切换）
+- [x] WebChat 新建会话按钮（侧边栏）
+- [x] WebChat 消息历史分页（滚动到顶加载更早消息，sticky 按钮）
+- [x] WebChat 会话列表分页（加载更多）
+- [x] 工具调用后自然语言不展示（修复：工具调用时不发送 done，保持 streaming）
+- [x] list_files 文件名不区分大小写
 
 ### 下一步（Phase 2a 续）
-- [ ] 内置工具：浏览器截图/填表、write_file、数据库查询（2a.3）
+- [ ] 内置工具：浏览器截图/填表、数据库查询（2a.3）
 - [ ] Skills 框架（2a.4）
 - [ ] 人格化与工作区（借鉴 OpenClaw，2a.5，DEC-032；实现参考 `docs/OPENCLAW_ANALYSIS.md`）
 - [ ] 飞书渠道（2a.6）
@@ -195,7 +203,7 @@ DEC-011 定义 V1 不含工具调用；V1 发布后 Phase 2a 已部分实现（�
 | 文件 | 作用 | 何时读 |
 |------|------|--------|
 | `AGENTS.md`（本文件） | 项目全貌 + 当前进度 | **第一个读这个** |
-| `docs/DECISIONS.md` | 决策记录（28 条当前有效决策） | **第二个读这个** |
+| `docs/DECISIONS.md` | 决策记录（30+ 条当前有效） | **第二个读这个** |
 | `docs/ROADMAP.md` | 路线图 + 每项任务的验收标准（DoD） | 想知道"下一步做什么" |
 | `docs/ARCHITECTURE.md` | 技术架构 + 部署模式 | 想了解"怎么实现/怎么部署" |
 | `docs/VISION.md` | 愿景、竞品分析 | 想了解"为什么做这个" |

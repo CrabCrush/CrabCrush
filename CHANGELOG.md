@@ -6,7 +6,37 @@
 
 ## [未发布]
 
+### 2026-02-17
+
+#### feat: WebChat 体验优化
+
+- **新建会话**：侧边栏「新建」按钮，点击后清空当前会话、显示欢迎页；服务端 `newSession` 消息重置 sessionId，下一条消息创建新会话
+- **消息历史分页**：首次加载最近 100 条；滚动到顶自动加载更早消息（sticky「加载更早的消息」按钮）；DB `getRecentMessages` 支持 offset
+- **会话列表分页**：超过 50 条时显示「加载更多」，支持 offset 分页
+- **工具调用后自然语言不展示**：修复 Gateway 在收到 `done` 且含 `toolCalls` 时不向客户端发送 `done`，避免提前结束 streaming 导致后续模型回复被忽略
+- **list_files 文件名不区分大小写**：pattern 匹配（如 `*.MD`）对文件名做 case-insensitive 比较
+
+#### feat: write_file 内置工具（Phase 2a.3）
+
+- 写入 ~/.crabcrush 下文件，自动创建父目录
+- 路径穿越检查、扩展名白名单（与 read_file 一致）
+- confirmRequired: true（待 2a.2 确认机制实现后生效）
+
+#### fix: system prompt 简化
+
+- 移除工具级示例列举，改为通用原则：「调用工具后，必须用自然语言向用户总结结果并给出建议」
+
+#### docs: 已知问题记录
+
+- ROADMAP 新增「已知问题」表：工具调用刷新后丢失、search_web 提案式沟通待改进
+
 ### 2026-02-13
+
+#### feat: WebChat 历史对话列表（多会话切换）
+
+- 点击 header「会话」按钮打开侧边栏，展示 webchat 渠道的会话列表
+- 点击会话项切换并加载该会话历史
+- 存储层 `listConversations` 支持按 channel 筛选
 
 #### fix: WebChat 历史记录与停止按钮
 

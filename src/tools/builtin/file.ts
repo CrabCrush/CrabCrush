@@ -7,8 +7,9 @@
  * 设计：DEC-030 — 大内容截断，不塞满上下文
  */
 
-import { readFile, readdir } from 'node:fs/promises';
-import { resolve, join, relative } from 'node:path';
+import { readFile, readdir, writeFile } from 'node:fs/promises';
+import { mkdirSync } from 'node:fs';
+import { resolve, join, relative, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import type { Tool, ToolContext, ToolResult } from '../types.js';
 
@@ -128,21 +129,22 @@ export function createReadFileTool(config?: { fileBase?: string }): Tool {
 /** 默认 read_file 工具（使用默认根目录，用于无 config 场景如测试） */
 export const readFileTool = createReadFileTool();
 
-/** 简单 glob 匹配：*.md / notes* / *report* */
+/** 简单 glob 匹配：*.md / notes* / *report*，文件名不区分大小写 */
 function matchPattern(name: string, pattern: string): boolean {
   if (!pattern || pattern === '*') return true;
-  const parts = pattern.split('*');
-  if (parts.length === 1) return name === pattern;
+  const n = name.toLowerCase();
+  const p = pattern.toLowerCase();
+  const parts = p.split('*');
+  if (parts.length === 1) return n === p;
   if (parts.length === 2) {
     const [p1, p2] = parts;
-    if (p1 && p2) return name.startsWith(p1) && name.endsWith(p2);
-    if (p1) return name.startsWith(p1);
-    if (p2) return name.endsWith(p2);
+    if (p1 && p2) return n.startsWith(p1) && n.endsWith(p2);
+    if (p1) return n.startsWith(p1);
+    if (p2) return n.endsWith(p2);
     return true;
   }
-  // *a*b* 等复杂模式：简单包含检查
   const required = parts.filter(Boolean);
-  return required.every((p) => name.includes(p));
+  return required.every((part) => n.includes(part));
 }
 
 /**
@@ -241,3 +243,80 @@ export function createListFilesTool(config?: { fileBase?: string }): Tool {
 }
 
 export const listFilesTool = createListFilesTool();
+
+/**
+ * 创建 write_file 工具（写入文件）
+ * 与 read_file 共用根目录，仅允许在 fileBase 下创建/覆盖文件
+ * confirmRequired: true（高危操作，待 2a.2 确认机制实现后生效）
+ */
+export function createWriteFileTool(config?: { fileBase?: string }): Tool {
+  return {
+    definition: {
+      name: 'write_file',
+      description: '将内容写入本地文件。当用户要求「保存」「写入」「创建文件」「修改 XXX 文件」时调用。仅可写入配置的根目录下（默认 ~/.crabcrush）。若文件已存在则覆盖。',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: {
+            type: 'string',
+            description: '相对于根目录的文件路径，如 workspace/notes.md',
+          },
+          content: {
+            type: 'string',
+            description: '要写入的文本内容',
+          },
+        },
+        required: ['path', 'content'],
+      },
+    },
+    permission: 'owner',
+    confirmRequired: true,
+
+    async execute(args: Record<string, unknown>, _context: ToolContext): Promise<ToolResult> {
+      const pathArg = args.path as string;
+      const content = args.content as string;
+
+      if (!pathArg || typeof pathArg !== 'string') {
+        return { success: false, content: '请提供有效的 path 参数' };
+      }
+      if (content === undefined || content === null) {
+        return { success: false, content: '请提供 content 参数' };
+      }
+
+      const basePath = getFileBasePath(config);
+      const baseDisplay = basePath.startsWith(homedir()) ? '~' + basePath.slice(homedir().length) : basePath;
+
+      const trimmed = pathArg.trim().replace(/^\/+/, '');
+      if (!isPathSafe(basePath, trimmed)) {
+        return { success: false, content: `路径不安全，仅允许写入 ${baseDisplay} 下的文件` };
+      }
+
+      if (!isAllowedExt(trimmed)) {
+        return {
+          success: false,
+          content: `不支持该文件类型。允许的扩展名：${[...ALLOWED_EXT].join(', ')}`,
+        };
+      }
+
+      const fullPath = resolve(basePath, trimmed);
+
+      try {
+        const dir = dirname(fullPath);
+        mkdirSync(dir, { recursive: true });
+        await writeFile(fullPath, String(content), { encoding: 'utf-8' });
+        return {
+          success: true,
+          content: `已写入 ${pathArg}（${String(content).length} 字符）`,
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes('EACCES')) {
+          return { success: false, content: `无写入权限：${pathArg}` };
+        }
+        return { success: false, content: `写入失败：${msg}` };
+      }
+    },
+  };
+}
+
+export const writeFileTool = createWriteFileTool();

@@ -7,7 +7,7 @@ import type { CrabCrushConfig } from '../../config/schema.js';
 import { getCurrentTimeTool } from './time.js';
 import { browseUrlTool } from './browser.js';
 import { searchWebTool } from './search.js';
-import { createReadFileTool, createListFilesTool } from './file.js';
+import { createReadFileTool, createListFilesTool, createWriteFileTool } from './file.js';
 
 /** 获取所有内置工具（需传入配置以支持 tools.fileBase） */
 export function getBuiltinTools(config?: CrabCrushConfig): Tool[] {
@@ -17,5 +17,6 @@ export function getBuiltinTools(config?: CrabCrushConfig): Tool[] {
     searchWebTool,
     createReadFileTool(config?.tools),
     createListFilesTool(config?.tools),
+    createWriteFileTool(config?.tools),
   ];
 }

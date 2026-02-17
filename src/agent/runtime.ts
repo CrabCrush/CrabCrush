@@ -267,10 +267,13 @@ export class AgentRuntime {
 
   /**
    * 获取会话的历史消息（用于 WebChat 加载历史）
+   * @param full 为 true 时返回全部消息（用于刷新后恢复），否则返回最近 contextWindow 条
    */
-  getHistory(sessionId: string): ChatMessage[] {
+  getHistory(sessionId: string, full = false): ChatMessage[] {
     if (this.store) {
-      const stored = this.store.getRecentMessages(sessionId, this.contextWindow);
+      const stored = full
+        ? this.store.getAllMessages(sessionId)
+        : this.store.getRecentMessages(sessionId, this.contextWindow);
       return stored.map(m => ({ role: m.role as ChatMessage['role'], content: m.content }));
     }
     const session = this.sessions.get(sessionId);

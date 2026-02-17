@@ -386,7 +386,10 @@
         statusEl.className = 'connected';
         if (!isStreaming) sendBtn.disabled = false;
 
-        // 如果有已保存的 sessionId，请求加载历史消息
+        // 刷新/重连时优先从 URL 读取 sessionId，确保加载正确会话
+        const urlParams = new URLSearchParams(location.search);
+        const sessionFromUrl = urlParams.get('session');
+        if (sessionFromUrl) sessionId = sessionFromUrl;
         if (sessionId) {
           ws.send(JSON.stringify({ type: 'loadHistory', sessionId }));
         }
@@ -417,21 +420,35 @@
           history.replaceState(null, '', url.toString());
 
         } else if (msg.type === 'history') {
-          // 服务器返回历史消息，渲染到聊天区域
+          // 同步 sessionId 与 URL，确保刷新时能正确恢复
+          if (msg.sessionId) {
+            sessionId = msg.sessionId;
+            localStorage.setItem('crabcrush_session', sessionId);
+            const url = new URL(location.href);
+            url.searchParams.set('session', sessionId);
+            history.replaceState(null, '', url.toString());
+          }
+          // 服务器返回历史消息，渲染到聊天区域（始终清空再渲染，避免重连时追加导致错乱）
           if (msg.messages && msg.messages.length > 0) {
-            // 清除欢迎消息
-            if (welcomeShown) {
-              messagesEl.innerHTML = '';
-              welcomeShown = false;
-            }
+            messagesEl.innerHTML = '';
+            welcomeShown = false;
+            const fragment = document.createDocumentFragment();
             for (const m of msg.messages) {
-              const el = addMessage(m.role, m.role === 'user' || m.role === 'error' ? m.content : '');
-              // assistant 消息：addMessage 只创建空 div，需手动渲染 Markdown
-              if (m.role === 'assistant' && m.content) {
-                el.innerHTML = md.render(m.content);
-                el.querySelectorAll('pre code').forEach(addCopyButton);
+              try {
+                const el = document.createElement('div');
+                el.className = `message ${m.role}`;
+                if (m.role === 'user' || m.role === 'error') {
+                  el.textContent = m.content || '';
+                } else if (m.role === 'assistant' && m.content) {
+                  el.innerHTML = md.render(m.content);
+                  // fence 渲染器已内置复制按钮，无需 addCopyButton
+                }
+                fragment.appendChild(el);
+              } catch (_err) {
+                // 单条渲染失败不影响其余消息
               }
             }
+            messagesEl.appendChild(fragment);
             messagesEl.scrollTop = messagesEl.scrollHeight;
           }
 

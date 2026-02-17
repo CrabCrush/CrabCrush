@@ -103,9 +103,9 @@ export async function startGateway(options: GatewayOptions = {}) {
             sessionId = msg.sessionId;
           }
 
-          // 客户端请求加载历史
+          // 客户端请求加载历史（刷新后恢复用 full=true 获取全部消息）
           if (msg.type === 'loadHistory') {
-            const history = agent.getHistory(sessionId);
+            const history = agent.getHistory(sessionId, true);
             socket.send(JSON.stringify({
               type: 'history',
               sessionId,

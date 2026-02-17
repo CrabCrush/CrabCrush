@@ -13,6 +13,11 @@
 - **历史记录**：sessionId 优先从 URL 的 `?session=xxx` 读取，收到 session 时写入 URL；避免多 Tab 共享 localStorage 时被覆盖，导致刷新后加载错误会话
 - **停止按钮**：chunk / done 处理器增加 `isStreaming` 检查，忽略 stop 后迟到的 chunk，避免产生孤立消息；避免重复处理 done
 
+#### fix: 刷新后历史记录只显示第一条
+
+- **根因**：历史渲染时调用未定义的 `addCopyButton`，抛出 ReferenceError 导致循环中断
+- **做法**：移除 addCopyButton 调用（fence 渲染器已内置复制按钮）；用 DocumentFragment 批量插入；收到 history 时始终清空再渲染；loadHistory 使用 getAllMessages 获取完整历史；ws.onopen 时从 URL 重读 sessionId
+
 #### fix: 工具调用后自然语言总结
 
 - **问题**：list_files 等工具调用后，模型只输出「用 read_file 读取」等引用说明，缺少自然语言总结

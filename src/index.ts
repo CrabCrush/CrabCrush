@@ -12,6 +12,7 @@ import { AgentRuntime } from './agent/runtime.js';
 import { ConversationStore } from './storage/database.js';
 import { ToolRegistry } from './tools/registry.js';
 import { getBuiltinTools } from './tools/builtin/index.js';
+import { getFileBasePath } from './tools/builtin/file.js';
 import { startGateway } from './gateway/server.js';
 import { DingTalkAdapter } from './channels/dingtalk.js';
 import { runDoctor } from './cli/doctor.js';
@@ -81,7 +82,8 @@ program
       toolRegistry.register(tool);
     }
 
-    // 初始化 Agent（带持久化 + 滑动窗口 + 工具调用）
+    // 初始化 Agent（带持久化 + 滑动窗口 + 工具调用 + 工作区人格化）
+    // fileBase 必须与文件工具一致，确保 write_file 写入 workspace/ 与工作区读取路径相同，跨会话共享人格
     const agent = new AgentRuntime({
       router,
       systemPrompt: config.agent.systemPrompt,
@@ -91,6 +93,7 @@ program
       debug: config.debug,
       toolRegistry,
       ownerIds: config.ownerIds,
+      fileBase: getFileBasePath(config.tools),
     });
 
     // 渠道适配器列表

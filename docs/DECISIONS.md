@@ -338,13 +338,13 @@
 
 ## DEC-032：人格化与工作区 — 借鉴 OpenClaw
 
-- **状态**：已规划，待实现（见 ROADMAP 2a.5）
+- **状态**：已实现（见 ROADMAP 2a.5）
 - **背景**：OpenClaw 通过工作区文件（SOUL.md、IDENTITY.md、USER.md）和 Bootstrap 首次对话，实现 AI 有名字、知道如何称呼用户、可配置语气性格。用户体感"智能"、"像真人"。
-- **决策**：规划引入工作区 + Bootstrap 机制
-  1. **工作区**：`~/.crabcrush/workspace/` 存放 IDENTITY.md（AI 名字/emoji/语气）、USER.md（用户名字/称呼）、SOUL.md（性格边界，可选）
+- **决策**：引入工作区 + Bootstrap 机制
+  1. **工作区**：`~/.crabcrush/workspace/` 固定路径，存放 IDENTITY.md（AI 名字/emoji/语气）、USER.md（用户名字/称呼）、SOUL.md（性格边界，可选）
   2. **系统提示词组装**：每次对话前注入工作区文件，替代或补充 `agent.systemPrompt`
-  3. **Bootstrap**：工作区为空时，AI 主动问「我是谁？怎么称呼你？喜欢什么语气？」并写入文件（需 `write_workspace` 工具或后端逻辑）
-  4. **配置**：`agent.skipBootstrap`、`agent.workspace`
+  3. **Bootstrap**：工作区为空时，首次会话主动问询人格；用户没回答可后续再问；用户拒绝则用默认值。通过 write_file 写入 workspace/ 下文件
+  4. **不提供配置**：无 agent.workspace、agent.skipBootstrap，保持零配置
 - **简化原则**：先做 IDENTITY + USER，SOUL 可选；不做 OpenClaw 的 HEARTBEAT、BOOT、MEMORY 等，保持精简
 
 ---

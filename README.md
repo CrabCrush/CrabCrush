@@ -62,7 +62,8 @@ pnpm install
 > 运行 `crabcrush doctor` 可检查是否已安装。
 > 依赖取舍说明（better-sqlite3、Playwright）见 [DEC-033](./docs/DECISIONS.md)。
 >
-> **read_file 根目录**：默认仅允许读取 `~/.crabcrush`。若要读取其他目录，可在 `crabcrush.yaml` 中配置 `tools.fileBase: /path/to/your/dir`，或设置环境变量 `CRABCRUSH_FILE_BASE`（环境变量优先）。
+> **read_file / list_files**：支持绝对路径，可查找、读取全盘任意位置。相对路径相对于 `tools.fileBase`（默认 `~/.crabcrush`）。
+> **write_file**：仅允许写入 `tools.fileBase` 下，不支持绝对路径。
 >
 > **说明**：WebChat 所需的前端库（markdown-it、highlight.js）已随仓库放在 `public/vendor/`，克隆即用，无需安装或运行任何脚本。
 
@@ -143,6 +144,16 @@ models:
     apiKey: sk-xxx
     defaultModel: qwen-max
 ```
+
+## 人格化与工作区
+
+首次会话时，AI 会像聊天一样自然开场（借鉴 OpenClaw），分步收集信息并写入 `~/.crabcrush/workspace/`：
+
+- **USER.md** — 名字、称呼、时区、notes（背景/在乎的事）
+- **IDENTITY.md** — AI 的 emoji、vibe、nature、名字
+- **SOUL.md** — 边界、偏好、希望 AI 如何表现
+
+一次只问一个问题，用户没回答可后续再问，用户说「不用了」则停止追问。
 
 ## 支持的渠道
 

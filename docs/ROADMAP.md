@@ -227,15 +227,15 @@ Phase 0 (当前)   Phase 1        Phase 2a       Phase 2b       Phase 2c       P
 - [ ] 内置技能包：2-3 个示例技能（如 database、browser）
 - [ ] 用户自定义技能目录：~/.crabcrush/workspace/skills/
 
-### 2a.5 人格化与工作区（借鉴 OpenClaw，详见 DEC-032）
+### 2a.5 人格化与工作区（借鉴 OpenClaw，详见 DEC-032）✅
 
 > 目标：AI 有名字、知道如何称呼用户、可配置语气性格，首次对话主动询问并持久化。
 > 实现时可参考 [OpenClaw 实现分析](OPENCLAW_ANALYSIS.md)（规则/记忆/人格化与 Token 策略）。
 
-- [ ] 工作区目录 `~/.crabcrush/workspace/`：IDENTITY.md（AI 名字/emoji/语气）、USER.md（用户名字/称呼）、SOUL.md（性格边界，可选）
-- [ ] 系统提示词组装：每次对话前注入工作区文件内容（替代或补充 `agent.systemPrompt`）
-- [ ] Bootstrap 首次对话：工作区为空时，AI 主动问「我是谁？怎么称呼你？喜欢什么语气？」并写入文件
-- [ ] 配置：`agent.skipBootstrap` 跳过引导、`agent.workspace` 自定义路径
+- [x] 工作区目录 `~/.crabcrush/workspace/`：IDENTITY.md（AI 名字/emoji/语气）、USER.md（用户名字/称呼）、SOUL.md（性格边界，可选）
+- [x] 系统提示词组装：每次对话前注入工作区文件内容（替代或补充 `agent.systemPrompt`）
+- [x] Bootstrap 首次会话：工作区为空时主动问询人格；用户没回答可后续再问；用户拒绝则用默认值
+- [ ] **待优化**：当前人格化不够智能，后续需改进（自然过渡、时机把握、记忆沉淀等）
 
 ### 2a.6 飞书渠道（工具就绪后再加）
 - [ ] 飞书适配器（验证渠道抽象层复用度）

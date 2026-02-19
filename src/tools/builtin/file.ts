@@ -246,7 +246,7 @@ export const listFilesTool = createListFilesTool();
 
 /**
  * 创建 write_file 工具（写入文件）
- * 与 read_file 共用根目录，仅允许在 fileBase 下创建/覆盖文件
+ * 与 read_file 共用根目录配置，仅允许在 fileBase 下创建/覆盖文件
  * confirmRequired: true（高危操作，待 2a.2 确认机制实现后生效）
  */
 export function createWriteFileTool(config?: { fileBase?: string }): Tool {

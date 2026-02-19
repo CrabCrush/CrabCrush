@@ -13,6 +13,12 @@ import type { ModelRouter } from '../models/router.js';
 import type { ConversationStore } from '../storage/database.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { ToolContext } from '../tools/types.js';
+import {
+  getWorkspacePath,
+  ensureWorkspaceDir,
+  readWorkspaceFiles,
+  buildSystemPrompt,
+} from '../workspace/index.js';
 
 export interface Session {
   id: string;
@@ -23,6 +29,7 @@ export interface Session {
 
 export interface AgentRuntimeOptions {
   router: ModelRouter;
+  /** 基础 system prompt（会与工作区内容、Bootstrap 组装） */
   systemPrompt: string;
   maxTokens: number;
   /** SQLite 存储（不传则纯内存模式，重启丢失） */
@@ -35,6 +42,8 @@ export interface AgentRuntimeOptions {
   toolRegistry?: ToolRegistry;
   /** Owner 用户 ID 列表（钉钉 userId / WebChat sessionId） */
   ownerIds?: string[];
+  /** 文件工具根目录（与 write_file 的 fileBase 一致，确保工作区读写路径一致） */
+  fileBase?: string;
 }
 
 /** 工具调用事件 — 通过 yield 返回给调用方，用于 UI 展示 */
@@ -78,23 +87,35 @@ export function parseToolBlocks(content: string): Array<{ name: string; args: Re
 export class AgentRuntime {
   private sessions = new Map<string, Session>();
   private router: ModelRouter;
-  private systemPrompt: string;
+  private basePrompt: string;
   private maxTokens: number;
   private store?: ConversationStore;
   private contextWindow: number;
   private debug: boolean;
   private toolRegistry?: ToolRegistry;
   private ownerIds: Set<string>;
+  private workspacePath: string;
 
   constructor(options: AgentRuntimeOptions) {
     this.router = options.router;
-    this.systemPrompt = options.systemPrompt;
+    this.basePrompt = options.systemPrompt;
     this.maxTokens = options.maxTokens;
     this.store = options.store;
     this.contextWindow = options.contextWindow ?? 40;
     this.debug = options.debug ?? false;
     this.toolRegistry = options.toolRegistry;
     this.ownerIds = new Set(options.ownerIds ?? []);
+    this.workspacePath = getWorkspacePath(options.fileBase);
+    ensureWorkspaceDir(this.workspacePath);
+  }
+
+  /**
+   * 获取当前应使用的 system prompt（含工作区人格注入）
+   * 工作区路径与 write_file 的 fileBase 一致，确保跨会话共享人格数据
+   */
+  private async resolveSystemPrompt(): Promise<string> {
+    const content = await readWorkspaceFiles(this.workspacePath);
+    return buildSystemPrompt(this.basePrompt, content);
   }
 
   /**
@@ -144,7 +165,10 @@ export class AgentRuntime {
     session.messages.push({ role: 'user', content: userMessage });
     this.store?.saveMessage(sessionId, 'user', userMessage);
 
-      // 工具调用循环
+    // 解析 system prompt（含工作区注入）
+    const systemPrompt = await this.resolveSystemPrompt();
+
+    // 工具调用循环
     let toolRound = 0;
     const accumulatedToolCalls: Array<{ name: string; args: Record<string, unknown>; result: string; success: boolean }> = [];
 
@@ -153,7 +177,7 @@ export class AgentRuntime {
       const recentMessages = session.messages.slice(-this.contextWindow);
 
       const messages: ChatMessage[] = [
-        { role: 'system', content: this.systemPrompt },
+        { role: 'system', content: systemPrompt },
         ...recentMessages,
       ];
 

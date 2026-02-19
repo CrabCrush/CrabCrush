@@ -191,10 +191,13 @@ DEC-011 定义 V1 不含工具调用；V1 发布后 Phase 2a 已部分实现（�
 - [x] 工具调用后自然语言不展示（修复：工具调用时不发送 done，保持 streaming）
 - [x] list_files 文件名不区分大小写
 
+### Phase 2a 已完成（续）
+- [x] 人格化与工作区（2a.5，DEC-032）：工作区 IDENTITY/USER/SOUL、Bootstrap 分步引导
+- [ ] **人格化待优化**：当前不够智能，后续需改进（见 ROADMAP 2a.5 备注）
+
 ### 下一步（Phase 2a 续）
 - [ ] 内置工具：浏览器截图/填表、数据库查询（2a.3）
 - [ ] Skills 框架（2a.4）
-- [ ] 人格化与工作区（借鉴 OpenClaw，2a.5，DEC-032；实现参考 `docs/OPENCLAW_ANALYSIS.md`）
 - [ ] 飞书渠道（2a.6）
 - [ ] 钉钉 Block Streaming（借鉴 OpenClaw，DEC-031）
 - 详见 `docs/ROADMAP.md` Phase 2a

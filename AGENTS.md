@@ -8,7 +8,7 @@
 如果你是第一次接触本项目的 AI 助手，请按顺序执行：
 
 1. **读完本文件**（AGENTS.md）— 你会了解项目全貌和当前进度
-2. **读 `docs/DECISIONS.md`** — 了解每个关键决策的背景和理由
+2. **按需查 `docs/DECISIONS.md`** — 只看与你要做的改动相关的 DEC 条目（用 DEC 编号/关键词搜索），避免全文阅读浪费 token
 3. **开始工作** — 根据下方"当前阶段 → 下一步"执行任务
 
 **不需要逐个审计所有文件。** 只需注意两条规则：
@@ -37,6 +37,21 @@
 
 **写文档的原则：最少够用。** 能用代码注释说清楚的，不写进文档。只有跨模块的重大决策才记入 DECISIONS.md。
 
+## AI 最小阅读路径（省 token）
+
+> 目标：让 AI “能做事”，而不是每次把整套文档都读一遍。
+
+**默认只读这些**：
+
+- `AGENTS.md`：只需要 “AI 行为准则 / 信息权威来源 / 当前阶段 / 下一步”
+- `docs/ROADMAP.md`：只读“当前正在做的 Phase（一般是 2a）”对应小节
+
+**按需再读**（遇到引用或需要做架构/取舍判断时再打开）：
+
+- `docs/DECISIONS.md`：用 `DEC-xxx` 或关键词定位到相关条目即可
+- `docs/ARCHITECTURE.md`：改模块边界、部署、鉴权、安全等再读
+- `docs/VISION.md`：做产品方向/对外叙事/长期规划时再读
+
 ## 项目一句话描述
 
 CrabCrush（小螃蟹）是一个面向中国用户的本地优先个人 AI 助手平台，支持企业微信/钉钉/飞书等国内主流渠道，
@@ -44,10 +59,9 @@ CrabCrush（小螃蟹）是一个面向中国用户的本地优先个人 AI 助�
 
 ## 项目背景
 
-- 灵感来源：[OpenClaw](https://github.com/openclaw/openclaw)（189k+ stars 的开源 AI 助手项目）
+- 灵感来源：[OpenClaw](https://github.com/openclaw/openclaw)
 - 核心差异：OpenClaw 面向欧美用户（WhatsApp/iMessage/Slack），CrabCrush 面向中国用户（企业微信/钉钉/飞书）
 - 命名寓意：OpenClaw 是龙虾🦞，CrabCrush 是螃蟹🦀 —— 同属甲壳纲，"做你的虾兵蟹将"
-- 开源协议：GPL-3.0 License
 
 ## 核心设计原则
 
@@ -73,62 +87,16 @@ CrabCrush（小螃蟹）是一个面向中国用户的本地优先个人 AI 助�
 - **模型接入**：OpenAI 兼容适配器覆盖大部分国产模型（详见 DEC-009）
 - **选型理由**：项目本质是 I/O 密集型消息网关，Node.js 异步模型天然适合；全栈统一语言减少复杂度；快速原型验证
 
-## 目录结构（实际）
+## 代码入口速览（够用即可）
 
-```
-crabcrush/
-├── AGENTS.md              # AI 上下文文件（本文件）
-├── README.md              # 项目介绍
-├── package.json           # 项目依赖
-├── tsconfig.json          # TypeScript 配置
-├── crabcrush.example.yaml # 配置示例
-├── docs/                  # 项目文档
-│   ├── VISION.md          # 项目愿景与竞品分析
-│   ├── ARCHITECTURE.md    # 技术架构 + 部署模式
-│   ├── ROADMAP.md         # 开发路线图
-│   └── DECISIONS.md       # 决策记录
-├── guide/                 # 使用指南
-│   └── dingtalk-setup.md  # 钉钉机器人接入指南
-├── src/                   # 源代码
-│   ├── index.ts           # CLI 入口（Commander.js）
-│   ├── config/            # 配置加载（YAML + env + Zod）
-│   │   ├── schema.ts      # Zod 校验 schema + KNOWN_PROVIDERS
-│   │   └── loader.ts      # 配置文件查找、环境变量合并
-│   ├── gateway/           # 网关核心
-│   │   └── server.ts      # Fastify HTTP + WebSocket + 静态文件
-│   ├── agent/             # Agent 运行时
-│   │   └── runtime.ts     # 会话管理 + 多轮上下文 + 工具调用循环
-│   ├── models/            # 模型适配层
-│   │   ├── provider.ts    # OpenAI 兼容适配器（SSE 流式 + Function Calling）
-│   │   ├── router.ts      # 模型路由器 + Failover
-│   │   └── pricing.ts    # 费用估算
-│   ├── storage/           # 本地持久化
-│   │   └── database.ts    # SQLite 对话存储
-│   ├── tools/             # 工具系统
-│   │   ├── types.ts       # Tool 接口（OpenAI Function Calling 格式）
-│   │   ├── registry.ts   # 工具注册中心
-│   │   └── builtin/       # 内置工具
-│   │       ├── index.ts
-│   │       ├── time.ts    # get_current_time
-│   │       ├── browser.ts # browse_url
-│   │       ├── search.ts  # search_web
-│   │       └── file.ts    # read_file, list_files, write_file
-│   ├── cli/               # CLI 子命令
-│   │   ├── onboard.ts     # 向导式配置
-│   │   └── doctor.ts      # 自检诊断
-│   └── channels/          # 渠道适配器
-│       ├── types.ts       # ChannelAdapter 接口 + ChatHandler 类型
-│       └── dingtalk.ts    # 钉钉 Stream 模式
-├── public/                # WebChat 前端（单页 HTML）
-│   └── index.html         # 聊天界面（Markdown + 代码高亮 + 流式输出 + 工具调用展示）
-└── test/                  # 测试
-    ├── gateway.test.ts    # Gateway 单元测试
-    ├── config.test.ts     # 配置模块测试
-    ├── models.test.ts     # 模型适配器测试
-    ├── storage.test.ts    # 存储层测试
-    ├── tools.test.ts      # 工具系统测试
-    └── channels.test.ts   # 渠道适配器测试
-```
+- **CLI 入口**：`src/index.ts`
+- **Gateway**：`src/gateway/server.ts`（HTTP + WebSocket + 静态文件）
+- **Agent Runtime**：`src/agent/runtime.ts`（会话 + 上下文 + 工具调用循环）
+- **模型层**：`src/models/provider.ts` / `src/models/router.ts`
+- **工具系统**：`src/tools/registry.ts` / `src/tools/builtin/*`
+- **存储**：`src/storage/database.ts`（SQLite）
+- **渠道**：`src/channels/*`（WebChat / DingTalk）
+- **WebChat 前端**：`public/index.html`
 
 ## 支持的渠道与模型
 
@@ -162,38 +130,11 @@ DEC-011 定义 V1 不含工具调用；V1 发布后 Phase 2a 已部分实现（�
 
 **V1 已发布（v0.1.0）** — 最后更新：2026-02-14
 
-### V1 已完成
-- [x] 工程脚手架：pnpm + TypeScript strict + Fastify v5 + Commander.js + Zod + Vitest + ESLint + GitHub Actions CI
-- [x] 配置系统：YAML + 环境变量 + Zod 校验，5 个国产模型 baseURL 预置
-- [x] OpenAI 兼容模型适配器：SSE 流式、30s 超时、自动重试、AbortController 中断
-- [x] 模型路由器 + Failover + 费用估算
-- [x] Agent Runtime：会话管理 + 多轮上下文
-- [x] Gateway：HTTP + WebSocket + 静态文件 + 优雅关闭
-- [x] WebChat：Markdown 渲染 + 代码高亮 + 停止生成
-- [x] 钉钉渠道：Stream 模式 + Markdown 卡片 + 会话隔离
-- [x] CLI：`crabcrush start` / `onboard` / `doctor`
-- [x] 30+ 条决策记录 + 完整文档体系
+### 已完成（浓缩版）
 
-### Phase 2a 已完成（部分）
-- [x] WebChat Token 认证（2a.0）
-- [x] SQLite 对话持久化 + 滑动窗口（2a.1）
-- [x] Function Calling + Owner 认证（2a.2）
-- [x] 内置工具 `get_current_time`（2a.2 验证）
-- [x] 内置工具 `browse_url`（2a.3 抓取网页内容）
-- [x] 内置工具 `search_web`（2a.3 智能多引擎：Google/Bing/百度）
-- [x] 内置工具 `read_file`（2a.3 读取 ~/.crabcrush 下文件）
-- [x] 内置工具 `list_files`（2a.3 查找/列出文件，支持 path/pattern/recursive）
-- [x] 内置工具 `write_file`（2a.3 写入 ~/.crabcrush 下文件，confirmRequired 待 2a.2 实现）
-- [x] WebChat 历史对话列表（2a.1 多会话切换）
-- [x] WebChat 新建会话按钮（侧边栏）
-- [x] WebChat 消息历史分页（滚动到顶加载更早消息，sticky 按钮）
-- [x] WebChat 会话列表分页（加载更多）
-- [x] 工具调用后自然语言不展示（修复：工具调用时不发送 done，保持 streaming）
-- [x] list_files 文件名不区分大小写
-
-### Phase 2a 已完成（续）
-- [x] 人格化与工作区（2a.5，DEC-032）：工作区 IDENTITY/USER/SOUL、Bootstrap 分步引导
-- [ ] **人格化待优化**：当前不够智能，后续需改进（见 ROADMAP 2a.5 备注）
+- **v0.1.0（V1）**：WebChat + 钉钉（Stream）纯对话；多轮上下文 + 流式输出；CLI（start/onboard/doctor）
+- **Phase 2a（已交付部分）**：Token 认证、SQLite 对话持久化 + 滑动窗口、Function Calling + Owner 权限、内置工具（time/browser/search/file）、工作区人格化（DEC-032）
+- **待补齐的关键安全/交互**：`confirmRequired` 确认机制仍为 TODO（工具层已标记，但运行时尚未拦截）
 
 ### 下一步（Phase 2a 续）
 - [ ] 内置工具：浏览器截图/填表、数据库查询（2a.3）
@@ -206,7 +147,7 @@ DEC-011 定义 V1 不含工具调用；V1 发布后 Phase 2a 已部分实现（�
 | 文件 | 作用 | 何时读 |
 |------|------|--------|
 | `AGENTS.md`（本文件） | 项目全貌 + 当前进度 | **第一个读这个** |
-| `docs/DECISIONS.md` | 决策记录（30+ 条当前有效） | **第二个读这个** |
+| `docs/DECISIONS.md` | 决策记录（当前有效） | **按需查**（遇到 DEC 引用或需要做取舍判断时，用 `DEC-xxx`/关键词定位） |
 | `docs/ROADMAP.md` | 路线图 + 每项任务的验收标准（DoD） | 想知道"下一步做什么" |
 | `docs/ARCHITECTURE.md` | 技术架构 + 部署模式 | 想了解"怎么实现/怎么部署" |
 | `docs/VISION.md` | 愿景、竞品分析 | 想了解"为什么做这个" |

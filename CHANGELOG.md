@@ -6,6 +6,14 @@
 
 ## [未发布]
 
+### 2026-02-24
+
+#### docs: streamline documentation for AI-assisted development
+
+- Add minimal reading paths / when-to-read guides across core docs (AGENTS/README/ROADMAP/ARCHITECTURE/VISION/DECISIONS)
+- Move long ROADMAP design details into `docs/DESIGN/` (permissions, actionable errors) with an index
+- Fix README wording to match current file tool sandbox (`tools.fileBase` relative paths only)
+
 ### 2026-02-17
 
 #### feat: WebChat 体验优化

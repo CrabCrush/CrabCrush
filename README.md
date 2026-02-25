@@ -7,6 +7,12 @@ CrabCrush 是一个面向中国用户的本地优先个人 AI 助手平台。
 
 [架构 & 部署](./docs/ARCHITECTURE.md) · [路线图](./docs/ROADMAP.md) · [决策记录](./docs/DECISIONS.md) · [愿景](./docs/VISION.md) · [更新日志](./CHANGELOG.md)
 
+## 给开发者 / AI 助手（最小阅读路径）
+
+- **先读**：`AGENTS.md`（规则/权威来源/当前阶段/下一步）
+- **再读**：`docs/ROADMAP.md`（只读当前 Phase，通常是 Phase 2a）
+- **按需查**：`docs/DECISIONS.md`（只定位相关 `DEC-xxx`，不要通读）
+
 ## 它是什么？
 
 CrabCrush **不是一个在线服务，是一个装在你自己电脑上的软件。** 钉钉/飞书只是你跟它交互的"遥控器"。
@@ -62,8 +68,8 @@ pnpm install
 > 运行 `crabcrush doctor` 可检查是否已安装。
 > 依赖取舍说明（better-sqlite3、Playwright）见 [DEC-033](./docs/DECISIONS.md)。
 >
-> **read_file / list_files**：支持绝对路径，可查找、读取全盘任意位置。相对路径相对于 `tools.fileBase`（默认 `~/.crabcrush`）。
-> **write_file**：仅允许写入 `tools.fileBase` 下，不支持绝对路径。
+> **read_file / list_files**：仅允许访问 `tools.fileBase`（默认 `~/.crabcrush`）下的**相对路径**（出于安全考虑，拒绝路径穿越）。如需让它访问其他目录，请把 `tools.fileBase` 指到你希望开放的根目录。
+> **write_file**：仅允许写入 `tools.fileBase` 下的相对路径（覆盖写入），且属于高危操作（`confirmRequired` 机制待完善）。
 >
 > **说明**：WebChat 所需的前端库（markdown-it、highlight.js）已随仓库放在 `public/vendor/`，克隆即用，无需安装或运行任何脚本。
 
@@ -164,32 +170,13 @@ models:
 | 飞书 | 🔜 规划中 | Phase 2 |
 | 企业微信 | 🔜 规划中 | Phase 2 |
 
-## 项目结构
-
-```
-crabcrush/
-├── src/
-│   ├── index.ts              # CLI 入口
-│   ├── config/               # 配置加载 (YAML + env + Zod)
-│   ├── models/               # 模型适配器 (OpenAI 兼容)
-│   ├── agent/                # Agent 运行时 (会话 + 多轮对话)
-│   ├── channels/             # 渠道适配器
-│   │   ├── types.ts          # ChannelAdapter 接口
-│   │   └── dingtalk.ts       # 钉钉 Stream
-│   └── gateway/              # Fastify 服务 (HTTP + WebSocket)
-├── public/                   # WebChat 前端
-├── test/                     # 测试
-├── docs/                     # 项目文档
-├── crabcrush.example.yaml    # 配置示例
-└── crabcrush.yaml            # 你的配置（不入 git）
-```
-
 ## 给开发者和 AI 助手
 
-本项目采用"文档即大脑"的协作模式。参与开发或让 AI 协助时，请先阅读以下两份文档：
+本项目采用"文档即大脑"的协作模式。参与开发或让 AI 协助时，建议按以下顺序快速进入上下文：
 
-1. [`AGENTS.md`](./AGENTS.md) — 项目全貌 + 当前进度
-2. [`docs/DECISIONS.md`](./docs/DECISIONS.md) — 关键决策的背景和理由
+1. [`AGENTS.md`](./AGENTS.md) — 项目全貌 + 当前进度 + “下一步”
+2. [`docs/ROADMAP.md`](./docs/ROADMAP.md) — 开发计划 + DoD（只看当前 Phase）
+3. [`docs/DECISIONS.md`](./docs/DECISIONS.md) — 按需定位相关 DEC 条目（不要通读）
 
 ## 灵感来源
 

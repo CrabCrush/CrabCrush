@@ -18,6 +18,8 @@
 
 #### fix: tool streaming + write_file UX
 
+- 去除示例配置与向导中的 systemPrompt，统一使用默认提示词
+
 - Stream rollback for tool calls via stream_control (clear speculative output)
 - Persist tool call blocks even when tool confirmation is rejected
 - Improve write_file intent checks and overwrite messaging
@@ -389,5 +391,6 @@ WebChat 和核心引擎的完善，从"能跑"到"好用"。
 - CLI 入口：Commander.js
 - TypeScript strict mode 配置
 - GPL-3.0 License
+
 
 

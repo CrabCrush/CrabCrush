@@ -18,15 +18,20 @@
 
 #### fix: tool streaming + write_file UX
 
-- 去除示例配置与向导中的 systemPrompt，统一使用默认提示词
-
-- Stream rollback for tool calls via stream_control (clear speculative output)
+- Stream rollback for tool calls via `stream_control` (clear speculative output)
 - Persist tool call blocks even when tool confirmation is rejected
 - Improve write_file intent checks and overwrite messaging
 - WebChat clears speculative bubble and shows a hint when rollback happens
 - Ignore stream_control in DingTalk stream handler
 - Add tests for write_file intent and overwrite
 
+#### docs: roadmap progress update
+
+- 更新 ROADMAP：标记 WebSocket 限流与工具确认现状，移除已解决问题
+
+#### docs: prompt dedup
+
+- 去除示例配置与向导中的 systemPrompt，统一使用默认提示词
 ### 2026-02-24
 
 #### docs: streamline documentation for AI-assisted development

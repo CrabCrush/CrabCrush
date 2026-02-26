@@ -334,9 +334,9 @@ Phase 0 + 1 ✅        Phase 2a (当前)      Phase 2b       Phase 2c       Phas
 
 | 项目 | 现状 | 规划 |
 |------|------|------|
-| **Gateway 请求限流** | 无 | 防止单 IP 滥用，Phase 2a 后期 |
+| **Gateway 请求限流** | WebSocket 基础限流已实现 | 规则配置化与覆盖更多入口（Phase 2a 后期） |
 | **持久化日志** | 仅控制台 | DEC-024：`~/.crabcrush/logs/`，Phase 2 |
-| **危险操作确认** | confirmRequired 为 TODO | 2a.2：confirmRequired + 运行时权限请求（Cursor 式） |
+| **危险操作确认** | confirmRequired 已支持（WebChat/DingTalk） | 运行时权限请求（Cursor 式）仍待 2a.2 |
 | **WebSocket 连接数限制** | 无 | 防止资源耗尽，Phase 2 |
 
 ---
@@ -345,7 +345,6 @@ Phase 0 + 1 ✅        Phase 2a (当前)      Phase 2b       Phase 2c       Phas
 
 | 问题 | 现象 | 期望行为 | 备注 |
 |------|------|----------|------|
-| **工具调用刷新后丢失** | search_web 等工具调用后，页面刷新时工具块（调用过程、结果引用）不展示 | 刷新后应恢复展示工具调用块 | 已尝试 __TOOL_CALL__ 持久化方案，用户反馈仍未解决 |
 | **search_web 工具调用体验** | 用户说「搜下明天天气」时，模型直接调用 search_web，查完才问地点；且只返回搜索引擎默认前几条，缺乏思考 | 提案式沟通：先问「请问您想查询哪个城市的天气？」再查；查前应思考搜索词（城市+日期+天气） | 涉及模型行为引导；或等 2b.2 天气专用工具 |
 
 ---
@@ -356,3 +355,4 @@ Phase 0 + 1 ✅        Phase 2a (当前)      Phase 2b       Phase 2c       Phas
 - **Issue 模板**：Bug Report / Feature Request / Channel Request
 - **PR 规范**：Conventional Commits + 代码审查
 - **社区渠道**：GitHub Discussions + 微信群/QQ群
+

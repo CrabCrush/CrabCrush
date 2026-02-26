@@ -322,6 +322,65 @@ describe('write_file tool', () => {
     expect(result.content).toContain('不支持');
   });
 
+  it('blocks write_file when no intent in userMessage', async () => {
+    const result = await writeFileTool.execute(
+      { path: 'workspace/a.txt', content: 'x' },
+      { ...ctx, userMessage: '你好' },
+    );
+    expect(result.success).toBe(false);
+    expect(result.content).toContain('未包含写文件意图');
+  });
+
+  it('rejects overwrite when file exists', async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'crabcrush-writefile-'));
+    const origBase = process.env.CRABCRUSH_FILE_BASE;
+    process.env.CRABCRUSH_FILE_BASE = tmpDir;
+
+    try {
+      const first = await writeFileTool.execute(
+        { path: 'workspace/exist.txt', content: 'first' },
+        ctx,
+      );
+      expect(first.success).toBe(true);
+
+      const second = await writeFileTool.execute(
+        { path: 'workspace/exist.txt', content: 'second' },
+        ctx,
+      );
+      expect(second.success).toBe(false);
+      expect(second.content).toContain('已存在');
+    } finally {
+      process.env.CRABCRUSH_FILE_BASE = origBase;
+      rmSync(tmpDir, { recursive: true });
+    }
+  });
+
+  it('allows overwrite when overwrite=true', async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'crabcrush-writefile-'));
+    const origBase = process.env.CRABCRUSH_FILE_BASE;
+    process.env.CRABCRUSH_FILE_BASE = tmpDir;
+
+    try {
+      const first = await writeFileTool.execute(
+        { path: 'workspace/exist.txt', content: 'first' },
+        ctx,
+      );
+      expect(first.success).toBe(true);
+
+      const second = await writeFileTool.execute(
+        { path: 'workspace/exist.txt', content: 'second', overwrite: true },
+        { ...ctx, userMessage: '覆盖该文件' },
+      );
+      expect(second.success).toBe(true);
+      const read = await readFileTool.execute({ path: 'workspace/exist.txt' }, ctx);
+      expect(read.success).toBe(true);
+      expect(read.content).toContain('second');
+    } finally {
+      process.env.CRABCRUSH_FILE_BASE = origBase;
+      rmSync(tmpDir, { recursive: true });
+    }
+  });
+
   it('writes file and creates parent dirs', async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), 'crabcrush-writefile-'));
     const origBase = process.env.CRABCRUSH_FILE_BASE;

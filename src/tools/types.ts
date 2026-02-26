@@ -59,6 +59,8 @@ export interface ToolContext {
   isOwner: boolean;
   /** 会话 ID */
   sessionId: string;
+  /** 当前用户消息（可选，用于安全策略） */
+  userMessage?: string;
   /** 需要确认时的回调（由通道层提供） */
   confirm?: ToolConfirmHandler;
   /** 审计日志回调（可选） */
@@ -84,6 +86,9 @@ export interface Tool {
   permission: ToolPermission;
   /** 是否需要用户确认才执行（高危操作，详见 DEC-026） */
   confirmRequired: boolean;
+  /** 执行前预检：返回 ToolResult 则直接返回，不再确认/执行 */
+  precheck?(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult | null>;
   /** 执行工具 */
   execute(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult>;
 }
+

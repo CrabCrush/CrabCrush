@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyWebSocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
-import type { AgentRuntime, ToolCallEvent } from '../agent/runtime.js';
+import type { AgentRuntime, ToolCallEvent, StreamControlEvent } from '../agent/runtime.js';
 import type { ToolConfirmHandler } from '../tools/types.js';
 import { estimateCost } from '../models/pricing.js';
 import type { ChatChunk } from '../models/provider.js';
@@ -245,6 +245,16 @@ export async function startGateway(options: GatewayOptions = {}) {
               for await (const event of agent.chat(sessionId, msg.content, abort.signal, sessionId, requestConfirm)) {
                 if (socket.readyState !== 1) break;
 
+                if ('type' in event && (event as StreamControlEvent).type === 'stream_control') {
+                  const ctrl = event as StreamControlEvent;
+                  socket.send(JSON.stringify({
+                    type: 'stream_control',
+                    action: ctrl.action,
+                    reason: ctrl.reason,
+                  }));
+                  continue;
+                }
+
                 // 工具调用事件
                 if ('type' in event && (event as ToolCallEvent).type === 'tool_call') {
                   const toolEvent = event as ToolCallEvent;
@@ -356,3 +366,4 @@ export async function startGateway(options: GatewayOptions = {}) {
 
   return app;
 }
+

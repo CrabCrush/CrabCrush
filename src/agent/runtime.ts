@@ -57,6 +57,13 @@ export interface ToolCallEvent {
   success: boolean;
 }
 
+/** 流式控制事件（用于撤回已输出内容） */
+export interface StreamControlEvent {
+  type: 'stream_control';
+  action: 'clear_last';
+  reason: 'tool_calls';
+}
+
 /** 最大工具调用轮次（防止无限循环） */
 const MAX_TOOL_ROUNDS = 5;
 
@@ -163,7 +170,7 @@ export class AgentRuntime {
     signal?: AbortSignal,
     senderId?: string,
     confirmToolCall?: ToolConfirmHandler,
-  ): AsyncIterable<ChatChunk | ToolCallEvent> {
+  ): AsyncIterable<ChatChunk | ToolCallEvent | StreamControlEvent> {
     const session = this.getOrCreateSession(sessionId);
 
     // 记录用户消息
@@ -183,7 +190,7 @@ export class AgentRuntime {
     let toolRound = 0;
     const accumulatedToolCalls: Array<{ name: string; args: Record<string, unknown>; result: string; success: boolean }> = [];
     let stopAfterToolRound = false;
-
+    let stopReason: string | null = null;
 
     while (toolRound <= MAX_TOOL_ROUNDS) {
       // 滑动窗口
@@ -224,6 +231,7 @@ export class AgentRuntime {
       // 调用模型
       let fullContent = '';
       let toolCalls: ToolCall[] | undefined;
+      let streamedContent = false;
 
       try {
         for await (const chunk of this.router.chat(messages, chatOptions)) {
@@ -235,6 +243,7 @@ export class AgentRuntime {
           }
           // 只 yield ChatChunk 类型（文本内容）
           yield chunk;
+          if (chunk.content) streamedContent = true;
         }
       } catch (err) {
         if (fullContent) {
@@ -268,10 +277,15 @@ export class AgentRuntime {
         }
       }
 
+      if (streamedContent) {
+        yield { type: 'stream_control', action: 'clear_last', reason: 'tool_calls' };
+        streamedContent = false;
+      }
+
       // 先记录 assistant 的工具调用消息
       const assistantMsg: ChatMessage = {
         role: 'assistant',
-        content: fullContent,
+        content: '',
         tool_calls: toolCalls,
       };
       session.messages.push(assistantMsg);
@@ -283,6 +297,7 @@ export class AgentRuntime {
         sessionId,
         confirm: confirmToolCall,
         audit: this.auditLogger,
+        userMessage,
       };
 
       for (const tc of toolCalls) {
@@ -316,6 +331,10 @@ export class AgentRuntime {
           const msg = result.content || '';
           if (msg.includes('用户拒绝执行工具') || msg.includes('确认超时') || msg.includes('需要用户确认')) {
             stopAfterToolRound = true;
+            stopReason = msg;
+          } else if (tc.function.name === 'write_file') {
+            stopAfterToolRound = true;
+            stopReason = msg || 'write_file 未执行。';
           }
         }
 
@@ -350,6 +369,15 @@ export class AgentRuntime {
 
       if (stopAfterToolRound) {
         // 用户拒绝/超时确认时，不再继续让模型生成回复，避免误导性响应
+        if (accumulatedToolCalls.length > 0) {
+          const toolBlockContent = accumulatedToolCalls.map((t) => serializeToolBlock(t)).join('\\n');
+          this.store?.saveMessage(sessionId, 'assistant', toolBlockContent);
+        }
+        const cancelMsg = stopReason ? '工具未执行：' + stopReason : '已取消该操作。';
+        session.messages.push({ role: 'assistant', content: cancelMsg });
+        this.store?.saveMessage(sessionId, 'assistant', cancelMsg);
+        yield { content: cancelMsg, done: false };
+        yield { content: '', done: true };
         break;
       }
 
@@ -409,3 +437,4 @@ export class AgentRuntime {
     return this.sessions.size;
   }
 }
+

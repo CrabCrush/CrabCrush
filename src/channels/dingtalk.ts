@@ -218,6 +218,9 @@ export class DingTalkAdapter implements ChannelAdapter {
 
       try {
         for await (const event of this.chatHandler(sessionId, content, undefined, payload.senderStaffId, requestConfirm)) {
+          if ('type' in event && (event as { type: string }).type === 'stream_control') {
+            continue;
+          }
           if ('type' in event && (event as { type: string }).type === 'tool_call') {
             const tc = event as { name: string; result?: string; success?: boolean };
             if (!toolNames.includes(tc.name)) toolNames.push(tc.name);
@@ -340,3 +343,4 @@ export class DingTalkAdapter implements ChannelAdapter {
     }
   }
 }
+

@@ -781,6 +781,20 @@
             }
             messagesEl.scrollTop = prevScrollTop + (messagesEl.scrollHeight - prevScrollHeight);
           }
+        } else if (msg.type === 'stream_control') {
+          if (msg.action === 'clear_last') {
+            if (currentBotMsg) {
+              cancelAnimationFrame(renderRAF);
+              const parent = currentBotMsg.parentNode;
+              if (parent) parent.removeChild(currentBotMsg);
+              currentBotMsg = null;
+            }
+            rawContent = '';
+            const hint = document.createElement('div');
+            hint.textContent = '已更新：检测到工具调用，已撤回先前输出。';
+            hint.style.cssText = 'font-size:0.85em;color:#9ca3af;margin:0.25rem 0 0.5rem;';
+            messagesEl.appendChild(hint);
+          }
         } else if (msg.type === 'confirm') {
           confirmQueue.push({ id: msg.id, name: msg.name, args: msg.args });
           showNextConfirm();
@@ -995,3 +1009,4 @@
   </script>
 </body>
 </html>
+

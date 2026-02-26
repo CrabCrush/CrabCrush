@@ -4,7 +4,7 @@
  */
 
 import type { ChatChunk } from '../models/provider.js';
-import type { ToolCallEvent } from '../agent/runtime.js';
+import type { ToolCallEvent, StreamControlEvent } from '../agent/runtime.js';
 import type { ToolConfirmHandler } from '../tools/types.js';
 
 /**
@@ -19,7 +19,7 @@ export type ChatHandler = (
   signal?: AbortSignal,
   senderId?: string,
   confirmToolCall?: ToolConfirmHandler,
-) => AsyncIterable<ChatChunk | ToolCallEvent>;
+) => AsyncIterable<ChatChunk | ToolCallEvent | StreamControlEvent>;
 
 /**
  * 渠道适配器基础接口
@@ -37,3 +37,4 @@ export interface ChannelAdapter {
   /** 注册消息处理函数（由 Gateway 注入 Agent） */
   setChatHandler(handler: ChatHandler): void;
 }
+

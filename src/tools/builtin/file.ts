@@ -7,7 +7,7 @@
  * 设计：DEC-030 — 大内容截断，不塞满上下文
  */
 
-import { readFile, readdir, writeFile } from 'node:fs/promises';
+import { readFile, readdir, writeFile, access } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';
 import { resolve, join, relative, dirname, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
@@ -73,7 +73,7 @@ export function createReadFileTool(config?: { fileBase?: string }): Tool {
     permission: 'owner',
     confirmRequired: false,
 
-    async execute(args: Record<string, unknown>, _context: ToolContext): Promise<ToolResult> {
+    async execute(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {
       const pathArg = args.path as string;
       const maxChars = (args.maxChars as number) || DEFAULT_MAX_CHARS;
 
@@ -185,7 +185,7 @@ export function createListFilesTool(config?: { fileBase?: string }): Tool {
     permission: 'owner',
     confirmRequired: false,
 
-    async execute(args: Record<string, unknown>, _context: ToolContext): Promise<ToolResult> {
+    async execute(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {
       const pathArg = ((args.path as string) || '.').trim().replace(/^\/+/, '') || '.';
       const pattern = (args.pattern as string)?.trim() || '';
       const recursive = Boolean(args.recursive);
@@ -212,7 +212,7 @@ export function createListFilesTool(config?: { fileBase?: string }): Tool {
           } else if (e.isDirectory()) {
             if (recursive) {
               await scan(resolve(dir, e.name), relPath, depth + 1);
-            } else {
+            } else if (!pattern) {
               results.push(relPath + '/'); // 标记为目录，便于用户继续 list_files
             }
           }
@@ -229,9 +229,12 @@ export function createListFilesTool(config?: { fileBase?: string }): Tool {
         }
         const list = results.slice(0, MAX_RESULTS).join('\n');
         const more = results.length >= MAX_RESULTS ? `\n（已截断，最多 ${MAX_RESULTS} 个）` : '';
+        const hint = pattern
+          ? '如需查看内容，请用 read_file 读取具体文件。'
+          : '使用 read_file 读取具体文件，如 read_file(path: "workspace/notes.md")';
         return {
           success: true,
-          content: `找到 ${results.length} 个文件：\n\n${list}${more}\n\n使用 read_file 读取具体文件，如 read_file(path: "workspace/notes.md")`,
+          content: `找到 ${results.length} 个文件：\n\n${list}${more}\n\n${hint}`,
         };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -267,6 +270,11 @@ export function createWriteFileTool(config?: { fileBase?: string }): Tool {
             type: 'string',
             description: '要写入的文本内容',
           },
+          overwrite: {
+            type: 'boolean',
+            description: '是否允许覆盖已存在文件，默认 false',
+            default: false,
+          },
         },
         required: ['path', 'content'],
       },
@@ -274,9 +282,59 @@ export function createWriteFileTool(config?: { fileBase?: string }): Tool {
     permission: 'owner',
     confirmRequired: true,
 
-    async execute(args: Record<string, unknown>, _context: ToolContext): Promise<ToolResult> {
+    async precheck(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult | null> {
+      const pathArg = args.path as string;
+      const overwrite = Boolean(args.overwrite);
+      const userMessage = (context.userMessage || '').toLowerCase();
+      const explicitOverwrite = /覆盖|重写|替换|改写|覆盖掉|覆盖它|覆盖该/.test(userMessage);
+      const allowOverwrite = overwrite && (explicitOverwrite || !context.userMessage);
+
+      if (!pathArg || typeof pathArg !== 'string') return null;
+      const writeIntent = /创建|新建|写入|新写|保存|生成文件|写文件|导出|保存为/.test(userMessage) || explicitOverwrite;
+      if (context.userMessage && !writeIntent) {
+        return {
+          success: false,
+          content: '当前请求未包含写文件意图，已阻止 write_file。',
+        };
+      }
+
+      const basePath = getFileBasePath(config);
+      const trimmed = pathArg.trim().replace(/^\/+/, '');
+      if (!isPathSafe(basePath, trimmed)) return null;
+
+      const fullPath = resolve(basePath, trimmed);
+      try {
+        await access(fullPath);
+        if (!allowOverwrite) {
+          return {
+            success: false,
+            content: `文件已存在：${pathArg}。如需覆盖，请明确说明“覆盖/重写”，我会再写入。`,
+          };
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!msg.includes('ENOENT')) {
+          return { success: false, content: `预检失败：${msg}` };
+        }
+      }
+
+      return null;
+    },
+
+    async execute(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {
       const pathArg = args.path as string;
       const content = args.content as string;
+      const overwrite = Boolean(args.overwrite);
+      const userMessage = (context.userMessage || '').toLowerCase();
+      const explicitOverwrite = /覆盖|重写|替换|改写|覆盖掉|覆盖它|覆盖该/.test(userMessage);
+      const allowOverwrite = overwrite && (explicitOverwrite || !context.userMessage);
+      const writeIntent = /创建|新建|写入|新写|保存|生成文件|写文件|导出|保存为/.test(userMessage) || explicitOverwrite;
+      if (context.userMessage && !writeIntent) {
+        return {
+          success: false,
+          content: '当前请求未包含写文件意图，已阻止 write_file。',
+        };
+      }
 
       if (!pathArg || typeof pathArg !== 'string') {
         return { success: false, content: '请提供有效的 path 参数' };
@@ -303,6 +361,19 @@ export function createWriteFileTool(config?: { fileBase?: string }): Tool {
       const fullPath = resolve(basePath, trimmed);
 
       try {
+        try {
+          await access(fullPath);
+          if (!allowOverwrite) {
+            return {
+              success: false,
+              content: `文件已存在：${pathArg}。如需覆盖，请明确说明“覆盖/重写”，我会再写入。`,
+            };
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (!msg.includes('ENOENT')) throw err;
+        }
+
         const dir = dirname(fullPath);
         mkdirSync(dir, { recursive: true });
         await writeFile(fullPath, String(content), { encoding: 'utf-8' });
@@ -322,3 +393,4 @@ export function createWriteFileTool(config?: { fileBase?: string }): Tool {
 }
 
 export const writeFileTool = createWriteFileTool();
+

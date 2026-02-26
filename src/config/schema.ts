@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+const DEFAULT_SYSTEM_PROMPT =   '你是 CrabCrush，一个友好的 AI 助手。请用中文回复。\n' +  '调用工具后，必须用自然语言向用户总结结果并给出建议，不要只引用工具输出或让用户自己去操作。\n' +  '如果工具执行失败或未执行，不要声称已经完成。';
+
 /**
  * 已知模型提供商的默认配置
  * 用户只需提供 apiKey，baseURL 自动填充
@@ -77,19 +79,14 @@ export const configSchema = z.object({
   agent: z.object({
     model: z.string().default('deepseek-chat'),
     fallbackModels: z.array(z.string()).default([]),
-    systemPrompt: z.string().default(
-      '你是 CrabCrush，一个友好的 AI 助手。请用中文回复。\n' +
-      '调用工具后，必须用自然语言向用户总结结果并给出建议，不要只引用工具输出或让用户自己去操作。',
-    ),
+    systemPrompt: z.string().default(DEFAULT_SYSTEM_PROMPT),
     maxTokens: z.number().int().default(4096),
     /** 发给 API 的最大消息条数（1 轮 = 2 条，默认 40 条 = 20 轮） */
     contextWindow: z.number().int().min(2).max(200).default(40),
   }).default({
     model: 'deepseek-chat',
     fallbackModels: [],
-    systemPrompt:
-      '你是 CrabCrush，一个友好的 AI 助手。请用中文回复。\n' +
-      '调用工具后，必须用自然语言向用户总结结果并给出建议，不要只引用工具输出或让用户自己去操作。',
+    systemPrompt: DEFAULT_SYSTEM_PROMPT,
     maxTokens: 4096,
     contextWindow: 40,
   }),
@@ -109,3 +106,4 @@ export const configSchema = z.object({
 export type CrabCrushConfig = z.infer<typeof configSchema>;
 export type ModelProviderConfig = z.infer<typeof modelProviderSchema>;
 export type DingTalkChannelConfig = z.infer<typeof dingtalkChannelSchema>;
+

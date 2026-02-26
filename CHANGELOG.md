@@ -16,6 +16,15 @@
 - Basic WebSocket chat rate limiting and audit logging (audit.log)
 - Harden file tool path safety on Windows + add tests
 
+#### fix: tool streaming + write_file UX
+
+- Stream rollback for tool calls via stream_control (clear speculative output)
+- Persist tool call blocks even when tool confirmation is rejected
+- Improve write_file intent checks and overwrite messaging
+- WebChat clears speculative bubble and shows a hint when rollback happens
+- Ignore stream_control in DingTalk stream handler
+- Add tests for write_file intent and overwrite
+
 ### 2026-02-24
 
 #### docs: streamline documentation for AI-assisted development
@@ -380,3 +389,5 @@ WebChat 和核心引擎的完善，从"能跑"到"好用"。
 - CLI 入口：Commander.js
 - TypeScript strict mode 配置
 - GPL-3.0 License
+
+

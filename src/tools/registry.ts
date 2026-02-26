@@ -63,6 +63,11 @@ export class ToolRegistry {
       };
     }
 
+    if (tool.precheck) {
+      const pre = await tool.precheck(args, context);
+      if (pre) return pre;
+    }
+
     if (tool.confirmRequired) {
       if (!context.confirm) {
         context.audit?.({

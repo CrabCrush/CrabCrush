@@ -14,6 +14,7 @@ import { ToolRegistry } from './tools/registry.js';
 import { getBuiltinTools } from './tools/builtin/index.js';
 import { getFileBasePath } from './tools/builtin/file.js';
 import { startGateway } from './gateway/server.js';
+import { createAuditLogger } from './audit/logger.js';
 import { DingTalkAdapter } from './channels/dingtalk.js';
 import { runDoctor } from './cli/doctor.js';
 import { runOnboard } from './cli/onboard.js';
@@ -82,6 +83,8 @@ program
       toolRegistry.register(tool);
     }
 
+    const auditLogger = createAuditLogger();
+
     // 初始化 Agent（带持久化 + 滑动窗口 + 工具调用 + 工作区人格化）
     // fileBase 必须与文件工具一致，确保 write_file 写入 workspace/ 与工作区读取路径相同，跨会话共享人格
     const agent = new AgentRuntime({
@@ -94,6 +97,7 @@ program
       toolRegistry,
       ownerIds: config.ownerIds,
       fileBase: getFileBasePath(config.tools),
+      auditLogger,
     });
 
     // 渠道适配器列表
@@ -106,8 +110,8 @@ program
         clientId: dt.clientId,
         clientSecret: dt.clientSecret,
       });
-      dingtalk.setChatHandler((sessionId, content, signal, senderId) =>
-        agent.chat(sessionId, content, signal, senderId),
+      dingtalk.setChatHandler((sessionId, content, signal, senderId, confirmToolCall) =>
+        agent.chat(sessionId, content, signal, senderId, confirmToolCall),
       );
       channels.push(dingtalk);
     }
@@ -117,7 +121,7 @@ program
 
     // 启动 Gateway（含 WebChat）
     const host = config.bind === 'all' ? '0.0.0.0' : '127.0.0.1';
-    const app = await startGateway({ port, bind: config.bind, agent, token });
+    const app = await startGateway({ port, bind: config.bind, agent, token, auditLogger });
 
     const { providerName, modelName } = router.primaryInfo;
     console.log(`\n🦀 CrabCrush Gateway 已启动`);

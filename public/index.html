@@ -380,6 +380,58 @@
     }
     @keyframes stop-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(220,38,38,0.4); } 50% { box-shadow: 0 0 0 6px rgba(220,38,38,0); } }
 
+    /* Confirm modal */
+    .confirm-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.55);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 200;
+      padding: 1rem;
+    }
+    .confirm-overlay.visible { display: flex; }
+    .confirm-modal {
+      width: min(520px, 92vw);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1rem;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+    }
+    .confirm-title {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 0.4rem;
+    }
+    .confirm-desc {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-bottom: 0.6rem;
+    }
+    .confirm-args {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.6rem;
+      font-size: 0.8rem;
+      font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', Consolas, monospace;
+      white-space: pre-wrap;
+      max-height: 180px;
+      overflow: auto;
+    }
+    .confirm-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.5rem;
+      margin-top: 0.8rem;
+    }
+    .confirm-actions .action-btn {
+      padding: 0.5rem 1rem;
+      font-size: 0.85rem;
+    }
+
     @media (max-width: 600px) {
       .message { max-width: 92%; font-size: 0.9rem; }
       #input-area { padding: 0.5rem; }
@@ -421,6 +473,18 @@
     <textarea id="input" placeholder="输入消息... (Enter 发送, Shift+Enter 换行, Esc 停止)" rows="1"></textarea>
     <button id="send" class="action-btn" disabled>发送</button>
     <button id="stop-btn" class="action-btn inactive" title="生成时可点击立即停止">停止</button>
+  </div>
+
+  <div id="confirm-overlay" class="confirm-overlay">
+    <div class="confirm-modal">
+      <div class="confirm-title" id="confirm-title">需要确认</div>
+      <div class="confirm-desc" id="confirm-desc">该操作可能会修改本地数据，请确认是否继续。</div>
+      <div class="confirm-args" id="confirm-args"></div>
+      <div class="confirm-actions">
+        <button id="confirm-deny" class="action-btn" style="background:#3f3f46">拒绝</button>
+        <button id="confirm-allow" class="action-btn" style="background:var(--primary)">允许</button>
+      </div>
+    </div>
   </div>
 
   <!-- 本地 /vendor 优先（不依赖外网 CDN）；失败时回退到国内 npmmirror -->
@@ -558,6 +622,12 @@
     const sendBtn = document.getElementById('send');
     const stopBtn = document.getElementById('stop-btn');
     const statusEl = document.getElementById('status');
+    const confirmOverlay = document.getElementById('confirm-overlay');
+    const confirmTitle = document.getElementById('confirm-title');
+    const confirmDesc = document.getElementById('confirm-desc');
+    const confirmArgs = document.getElementById('confirm-args');
+    const confirmAllowBtn = document.getElementById('confirm-allow');
+    const confirmDenyBtn = document.getElementById('confirm-deny');
 
     let ws;
     let currentBotMsg = null;
@@ -568,6 +638,33 @@
     let sessionId = urlParamsInit.get('session') || localStorage.getItem('crabcrush_session') || null;
     let welcomeShown = true;
     let renderRAF = null;         // requestAnimationFrame ID，用于节流渲染
+
+    const confirmQueue = [];
+    let activeConfirm = null;
+
+    function showNextConfirm() {
+      if (activeConfirm || confirmQueue.length === 0) return;
+      activeConfirm = confirmQueue.shift();
+      if (!activeConfirm) return;
+      if (confirmTitle) confirmTitle.textContent = `需要确认：${activeConfirm.name || ''}`;
+      if (confirmDesc) confirmDesc.textContent = '该操作可能会修改本地数据，请确认是否继续。';
+      if (confirmArgs) confirmArgs.textContent = JSON.stringify(activeConfirm.args || {}, null, 2);
+      if (confirmOverlay) confirmOverlay.classList.add('visible');
+    }
+
+    function resolveConfirm(allow) {
+      if (!activeConfirm) return;
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({
+          type: 'confirm_result',
+          id: activeConfirm.id,
+          allow: Boolean(allow),
+        }));
+      }
+      activeConfirm = null;
+      if (confirmOverlay) confirmOverlay.classList.remove('visible');
+      showNextConfirm();
+    }
 
     // ── WebSocket 连接 ──
     function connect() {
@@ -684,6 +781,10 @@
             }
             messagesEl.scrollTop = prevScrollTop + (messagesEl.scrollHeight - prevScrollHeight);
           }
+        } else if (msg.type === 'confirm') {
+          confirmQueue.push({ id: msg.id, name: msg.name, args: msg.args });
+          showNextConfirm();
+
         } else if (msg.type === 'tool_call') {
           // 工具调用事件 — 在聊天区域显示调用过程
           const toolEl = document.createElement('div');
@@ -848,6 +949,13 @@
     // ── 事件绑定 ──
     sendBtn.addEventListener('click', send);
     stopBtn.addEventListener('click', stopGeneration);
+    if (confirmAllowBtn) confirmAllowBtn.addEventListener('click', () => resolveConfirm(true));
+    if (confirmDenyBtn) confirmDenyBtn.addEventListener('click', () => resolveConfirm(false));
+    if (confirmOverlay) {
+      confirmOverlay.addEventListener('click', (e) => {
+        if (e.target === confirmOverlay) resolveConfirm(false);
+      });
+    }
     document.getElementById('sessions-btn').addEventListener('click', openSessionsSidebar);
     document.getElementById('sessions-close').addEventListener('click', closeSessionsSidebar);
     document.getElementById('sessions-new').addEventListener('click', newSession);

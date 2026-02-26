@@ -63,8 +63,42 @@ export class ToolRegistry {
       };
     }
 
-    // TODO(Phase 2a.2): 确认机制 — tool.confirmRequired 为 true 时需要用户确认
-    // 目前先直接执行，后续通过 WebSocket 实现交互式确认
+    if (tool.confirmRequired) {
+      if (!context.confirm) {
+        context.audit?.({
+          type: 'tool_confirm_missing',
+          name,
+          sessionId: context.sessionId,
+          senderId: context.senderId,
+        });
+        return { success: false, content: `工具 "${name}" 需要用户确认，当前通道不支持确认。` };
+      }
+
+      let allowed = false;
+      try {
+        allowed = await context.confirm({
+          name,
+          args,
+          sessionId: context.sessionId,
+          senderId: context.senderId,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { success: false, content: `确认失败: ${message}` };
+      }
+
+      context.audit?.({
+        type: 'tool_confirm',
+        name,
+        sessionId: context.sessionId,
+        senderId: context.senderId,
+        allowed,
+      });
+
+      if (!allowed) {
+        return { success: false, content: `用户拒绝执行工具 "${name}"` };
+      }
+    }
 
     try {
       return await tool.execute(args, context);

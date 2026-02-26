@@ -5,6 +5,7 @@
 
 import type { ChatChunk } from '../models/provider.js';
 import type { ToolCallEvent } from '../agent/runtime.js';
+import type { ToolConfirmHandler } from '../tools/types.js';
 
 /**
  * 聊天处理函数
@@ -17,6 +18,7 @@ export type ChatHandler = (
   content: string,
   signal?: AbortSignal,
   senderId?: string,
+  confirmToolCall?: ToolConfirmHandler,
 ) => AsyncIterable<ChatChunk | ToolCallEvent>;
 
 /**

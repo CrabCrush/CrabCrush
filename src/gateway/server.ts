@@ -4,6 +4,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyWebSocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
 import type { AgentRuntime, ToolCallEvent } from '../agent/runtime.js';
+import type { ToolConfirmHandler } from '../tools/types.js';
 import { estimateCost } from '../models/pricing.js';
 import type { ChatChunk } from '../models/provider.js';
 
@@ -16,6 +17,8 @@ export interface GatewayOptions {
   agent?: AgentRuntime;
   /** 访问令牌，设置后 WebChat 和 WebSocket 需要 ?token=xxx */
   token?: string;
+  /** 审计日志回调（可选） */
+  auditLogger?: (event: { type: string; [key: string]: unknown }) => void;
 }
 
 /**
@@ -56,6 +59,24 @@ export async function startGateway(options: GatewayOptions = {}) {
   const host = options.bind === 'all' ? '0.0.0.0' : '127.0.0.1';
   const app = createGateway(options);
 
+  const audit = options.auditLogger;
+
+  // 简单限流（WebSocket chat 消息）
+  const rateLimitWindowMs = 10_000;
+  const rateLimitMax = 5;
+  const rateLimits = new Map<string, { count: number; resetAt: number }>();
+  const allowRequest = (key: string): boolean => {
+    const now = Date.now();
+    const existing = rateLimits.get(key);
+    if (!existing || existing.resetAt <= now) {
+      rateLimits.set(key, { count: 1, resetAt: now + rateLimitWindowMs });
+      return true;
+    }
+    if (existing.count >= rateLimitMax) return false;
+    existing.count += 1;
+    return true;
+  };
+
   // Token 校验辅助函数
   const token = options.token;
   const validateToken = (query: Record<string, unknown>): boolean => {
@@ -81,6 +102,36 @@ export async function startGateway(options: GatewayOptions = {}) {
       let sessionId = `webchat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       let currentAbort: AbortController | null = null;
 
+      const pendingConfirms = new Map<string, {
+        resolve: (allow: boolean) => void;
+        timeout: NodeJS.Timeout;
+        name: string;
+      }>();
+
+      const requestConfirm: ToolConfirmHandler = async ({ name, args }) => {
+        const id = `confirm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const timeoutMs = 30_000;
+        audit?.({ type: 'tool_confirm_request', sessionId, name });
+
+        return await new Promise<boolean>((resolve) => {
+          const timeout = setTimeout(() => {
+            pendingConfirms.delete(id);
+            resolve(false);
+          }, timeoutMs);
+
+          pendingConfirms.set(id, { resolve, timeout, name });
+          if (socket.readyState === 1) {
+            socket.send(JSON.stringify({
+              type: 'confirm',
+              id,
+              name,
+              args,
+              timeoutMs,
+            }));
+          }
+        });
+      };
+
       // WebSocket ping/pong 保活
       const pingInterval = setInterval(() => {
         if (socket.readyState === 1) {
@@ -92,6 +143,11 @@ export async function startGateway(options: GatewayOptions = {}) {
         clearInterval(pingInterval);
         // 连接关闭时中断进行中的生成
         currentAbort?.abort();
+        for (const [id, pending] of pendingConfirms.entries()) {
+          clearTimeout(pending.timeout);
+          pending.resolve(false);
+          pendingConfirms.delete(id);
+        }
       });
 
       socket.on('message', async (raw: Buffer | string) => {
@@ -101,6 +157,18 @@ export async function startGateway(options: GatewayOptions = {}) {
           // 客户端可以指定 sessionId（用于重连恢复会话）
           if (msg.sessionId) {
             sessionId = msg.sessionId;
+          }
+
+          if (msg.type === 'confirm_result') {
+            const pending = pendingConfirms.get(msg.id);
+            if (pending) {
+              clearTimeout(pending.timeout);
+              pendingConfirms.delete(msg.id);
+              const allow = Boolean(msg.allow);
+              audit?.({ type: 'tool_confirm_result', sessionId, name: pending.name, allowed: allow });
+              pending.resolve(allow);
+            }
+            return;
           }
 
           // 客户端请求新建会话（点击「新建」后，服务端重置 sessionId，下一条 chat 将创建新会话）
@@ -144,6 +212,21 @@ export async function startGateway(options: GatewayOptions = {}) {
           }
 
           if (msg.type === 'chat' && msg.content) {
+            const ip = req.socket.remoteAddress ?? 'unknown';
+            if (!allowRequest(`ws:${ip}`)) {
+              socket.send(JSON.stringify({ type: 'error', message: '请求过于频繁，请稍后再试' }));
+              audit?.({ type: 'rate_limited', ip, sessionId });
+              return;
+            }
+
+            audit?.({
+              type: 'chat_request',
+              sessionId,
+              senderId: sessionId,
+              ip,
+              length: String(msg.content).length,
+            });
+
             // 中断上一个进行中的请求（如果有）
             currentAbort?.abort();
 
@@ -159,7 +242,7 @@ export async function startGateway(options: GatewayOptions = {}) {
             try {
               // 流式回复（支持 ChatChunk 和 ToolCallEvent 两种事件）
               // WebChat 用 sessionId 作为 senderId（DEC-026 Owner 判断）
-              for await (const event of agent.chat(sessionId, msg.content, abort.signal, sessionId)) {
+              for await (const event of agent.chat(sessionId, msg.content, abort.signal, sessionId, requestConfirm)) {
                 if (socket.readyState !== 1) break;
 
                 // 工具调用事件

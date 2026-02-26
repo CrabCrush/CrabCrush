@@ -38,6 +38,17 @@ export interface ToolDefinition {
  */
 export type ToolPermission = 'public' | 'owner';
 
+/** 工具确认请求 */
+export interface ToolConfirmRequest {
+  name: string;
+  args: Record<string, unknown>;
+  sessionId: string;
+  senderId: string;
+}
+
+/** 工具确认处理器 */
+export type ToolConfirmHandler = (request: ToolConfirmRequest) => Promise<boolean>;
+
 /**
  * 工具执行上下文
  */
@@ -48,6 +59,10 @@ export interface ToolContext {
   isOwner: boolean;
   /** 会话 ID */
   sessionId: string;
+  /** 需要确认时的回调（由通道层提供） */
+  confirm?: ToolConfirmHandler;
+  /** 审计日志回调（可选） */
+  audit?: (event: { type: string; [key: string]: unknown }) => void;
 }
 
 /**

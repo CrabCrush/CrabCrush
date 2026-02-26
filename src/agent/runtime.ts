@@ -12,7 +12,7 @@ import type { ChatMessage, ChatChunk, ChatOptions, ToolCall } from '../models/pr
 import type { ModelRouter } from '../models/router.js';
 import type { ConversationStore } from '../storage/database.js';
 import type { ToolRegistry } from '../tools/registry.js';
-import type { ToolContext } from '../tools/types.js';
+import type { ToolContext, ToolConfirmHandler } from '../tools/types.js';
 import {
   getWorkspacePath,
   ensureWorkspaceDir,
@@ -44,6 +44,8 @@ export interface AgentRuntimeOptions {
   ownerIds?: string[];
   /** 文件工具根目录（与 write_file 的 fileBase 一致，确保工作区读写路径一致） */
   fileBase?: string;
+  /** 审计日志回调（可选） */
+  auditLogger?: (event: { type: string; [key: string]: unknown }) => void;
 }
 
 /** 工具调用事件 — 通过 yield 返回给调用方，用于 UI 展示 */
@@ -95,6 +97,7 @@ export class AgentRuntime {
   private toolRegistry?: ToolRegistry;
   private ownerIds: Set<string>;
   private workspacePath: string;
+  private auditLogger?: (event: { type: string; [key: string]: unknown }) => void;
 
   constructor(options: AgentRuntimeOptions) {
     this.router = options.router;
@@ -106,6 +109,7 @@ export class AgentRuntime {
     this.toolRegistry = options.toolRegistry;
     this.ownerIds = new Set(options.ownerIds ?? []);
     this.workspacePath = getWorkspacePath(options.fileBase);
+    this.auditLogger = options.auditLogger;
     ensureWorkspaceDir(this.workspacePath);
   }
 
@@ -158,12 +162,19 @@ export class AgentRuntime {
     userMessage: string,
     signal?: AbortSignal,
     senderId?: string,
+    confirmToolCall?: ToolConfirmHandler,
   ): AsyncIterable<ChatChunk | ToolCallEvent> {
     const session = this.getOrCreateSession(sessionId);
 
     // 记录用户消息
     session.messages.push({ role: 'user', content: userMessage });
     this.store?.saveMessage(sessionId, 'user', userMessage);
+    this.auditLogger?.({
+      type: 'chat_input',
+      sessionId,
+      senderId: senderId ?? sessionId,
+      length: userMessage.length,
+    });
 
     // 解析 system prompt（含工作区注入）
     const systemPrompt = await this.resolveSystemPrompt();
@@ -171,6 +182,8 @@ export class AgentRuntime {
     // 工具调用循环
     let toolRound = 0;
     const accumulatedToolCalls: Array<{ name: string; args: Record<string, unknown>; result: string; success: boolean }> = [];
+    let stopAfterToolRound = false;
+
 
     while (toolRound <= MAX_TOOL_ROUNDS) {
       // 滑动窗口
@@ -268,6 +281,8 @@ export class AgentRuntime {
         senderId: senderId ?? sessionId,
         isOwner,
         sessionId,
+        confirm: confirmToolCall,
+        audit: this.auditLogger,
       };
 
       for (const tc of toolCalls) {
@@ -278,9 +293,31 @@ export class AgentRuntime {
           // 模型返回的参数格式不正确
         }
 
+        this.auditLogger?.({
+          type: 'tool_call',
+          sessionId,
+          senderId: senderId ?? sessionId,
+          name: tc.function.name,
+        });
+
         const result = this.toolRegistry
           ? await this.toolRegistry.execute(tc.function.name, args, toolContext)
           : { success: false, content: '工具系统未启用' };
+
+        this.auditLogger?.({
+          type: 'tool_result',
+          sessionId,
+          senderId: senderId ?? sessionId,
+          name: tc.function.name,
+          success: result.success,
+        });
+
+        if (!result.success) {
+          const msg = result.content || '';
+          if (msg.includes('用户拒绝执行工具') || msg.includes('确认超时') || msg.includes('需要用户确认')) {
+            stopAfterToolRound = true;
+          }
+        }
 
         if (this.debug) {
           console.log(`  ← ${tc.function.name}: ${result.success ? '✓' : '✗'} ${result.content.slice(0, 100)}`);
@@ -309,6 +346,11 @@ export class AgentRuntime {
           tool_call_id: tc.id,
         };
         session.messages.push(toolMsg);
+      }
+
+      if (stopAfterToolRound) {
+        // 用户拒绝/超时确认时，不再继续让模型生成回复，避免误导性响应
+        break;
       }
 
       // 继续循环，让模型根据工具结果生成最终回复

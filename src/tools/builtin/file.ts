@@ -9,7 +9,7 @@
 
 import { readFile, readdir, writeFile } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';
-import { resolve, join, relative, dirname } from 'node:path';
+import { resolve, join, relative, dirname, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
 import type { Tool, ToolContext, ToolResult } from '../types.js';
 
@@ -29,9 +29,11 @@ function isAllowedExt(filePath: string): boolean {
 }
 
 function isPathSafe(base: string, relativePath: string): boolean {
+  const resolvedBase = resolve(base);
   const resolved = resolve(base, relativePath);
-  const rel = relative(base, resolved);
-  return !rel.startsWith('..') && !rel.startsWith('/');
+  const rel = relative(resolvedBase, resolved);
+  if (rel == '') return true;
+  return !rel.startsWith('..') && !isAbsolute(rel);
 }
 
 /** 获取 read_file 根目录：环境变量 > YAML 配置 > 默认 ~/.crabcrush */

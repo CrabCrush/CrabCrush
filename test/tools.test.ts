@@ -207,6 +207,13 @@ describe('read_file tool', () => {
     expect(result.content).toContain('不安全');
   });
 
+  it('rejects absolute path on Windows', async () => {
+    if (process.platform !== 'win32') return;
+    const result = await readFileTool.execute({ path: 'C:\\Windows\\System32\\drivers\\etc\\hosts' }, ctx);
+    expect(result.success).toBe(false);
+    expect(result.content).toContain('不安全');
+  });
+
   it('rejects disallowed file types', async () => {
     const result = await readFileTool.execute({ path: 'workspace/image.png' }, ctx);
     expect(result.success).toBe(false);

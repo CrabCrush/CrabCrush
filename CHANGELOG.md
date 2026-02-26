@@ -6,6 +6,16 @@
 
 ## [未发布]
 
+### 2026-02-26
+
+#### feat: tool confirmation + audit + safety hardening
+
+- Implement confirmRequired handling in tool registry (exec blocked without confirmation)
+- WebChat confirm modal + runtime confirm flow (WebSocket confirm/confirm_result)
+- DingTalk text-based confirm flow (allow/deny + better formatting + auto-match latest)
+- Basic WebSocket chat rate limiting and audit logging (audit.log)
+- Harden file tool path safety on Windows + add tests
+
 ### 2026-02-24
 
 #### docs: streamline documentation for AI-assisted development

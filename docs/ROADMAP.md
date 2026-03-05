@@ -158,6 +158,7 @@ Phase 0 + 1 ✅        Phase 2a (当前)      Phase 2b       Phase 2c       Phas
 - [x] Owner 认证机制（`ownerIds` 配置，未配置时默认所有人是 owner）
 - [ ] 代码执行沙箱选型决策（Docker vs 隔离进程 vs worker_threads）
 - [ ] 数据安全防线（DEC-028）：工具结果脱敏、列白名单、确认机制
+- [ ] **安全可控原则（DEC-034）**：高风险操作（读/写/删、本地命令、脚本执行、外部网络访问等）必须走 `confirmRequired`（工具级）或 `permission_request`（请求级）确认流程
 - [ ] **运行时权限请求**（Cursor 式）：执行前主动询问「是否允许访问 XX」「是否允许安装 XX」（设计见 [`docs/DESIGN/permissions.md`](./DESIGN/permissions.md)）
 
 > 说明：该部分属于“交互/协议设计”，已下沉到 `docs/DESIGN/permissions.md`，避免路线图过长；ROADMAP 这里仅保留目标与待办。
@@ -355,4 +356,6 @@ Phase 0 + 1 ✅        Phase 2a (当前)      Phase 2b       Phase 2c       Phas
 - **Issue 模板**：Bug Report / Feature Request / Channel Request
 - **PR 规范**：Conventional Commits + 代码审查
 - **社区渠道**：GitHub Discussions + 微信群/QQ群
+
+
 

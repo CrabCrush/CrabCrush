@@ -12,7 +12,7 @@ import type { ChatMessage, ChatChunk, ChatOptions, ToolCall } from '../models/pr
 import type { ModelRouter } from '../models/router.js';
 import type { ConversationStore } from '../storage/database.js';
 import type { ToolRegistry } from '../tools/registry.js';
-import type { ToolContext, ToolConfirmHandler } from '../tools/types.js';
+import type { ToolContext, ToolConfirmHandler, PermissionRequest } from '../tools/types.js';
 import {
   getWorkspacePath,
   ensureWorkspaceDir,
@@ -291,11 +291,23 @@ export class AgentRuntime {
       session.messages.push(assistantMsg);
 
       // 逐个执行工具
+      const requestPermission = confirmToolCall
+        ? async (req: PermissionRequest) => confirmToolCall({
+          name: req.action,
+          args: req.params ?? {},
+          sessionId,
+          senderId: senderId ?? sessionId,
+          kind: 'permission_request',
+          message: req.message,
+        })
+        : undefined;
+
       const toolContext: ToolContext = {
         senderId: senderId ?? sessionId,
         isOwner,
         sessionId,
         confirm: confirmToolCall,
+        requestPermission,
         audit: this.auditLogger,
         userMessage,
       };
@@ -437,4 +449,7 @@ export class AgentRuntime {
     return this.sessions.size;
   }
 }
+
+
+
 

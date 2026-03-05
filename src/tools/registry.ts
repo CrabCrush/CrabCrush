@@ -75,6 +75,7 @@ export class ToolRegistry {
           name,
           sessionId: context.sessionId,
           senderId: context.senderId,
+          kind: 'confirm',
         });
         return { success: false, content: `工具 "${name}" 需要用户确认，当前通道不支持确认。` };
       }
@@ -86,6 +87,7 @@ export class ToolRegistry {
           args,
           sessionId: context.sessionId,
           senderId: context.senderId,
+          kind: 'confirm',
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -127,3 +129,6 @@ export class ToolRegistry {
     return [...this.tools.keys()];
   }
 }
+
+
+

@@ -108,7 +108,7 @@ export async function startGateway(options: GatewayOptions = {}) {
         name: string;
       }>();
 
-      const requestConfirm: ToolConfirmHandler = async ({ name, args }) => {
+      const requestConfirm: ToolConfirmHandler = async ({ name, args, kind, message }) => {
         const id = `confirm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         const timeoutMs = 30_000;
         audit?.({ type: 'tool_confirm_request', sessionId, name });
@@ -126,6 +126,8 @@ export async function startGateway(options: GatewayOptions = {}) {
               id,
               name,
               args,
+              kind,
+              message,
               timeoutMs,
             }));
           }
@@ -366,4 +368,7 @@ export async function startGateway(options: GatewayOptions = {}) {
 
   return app;
 }
+
+
+
 

@@ -190,14 +190,18 @@ export class DingTalkAdapter implements ChannelAdapter {
       let fullContent = '';
       const toolNames: string[] = [];
       const toolResults: string[] = [];
-      const requestConfirm: ToolConfirmHandler = async ({ name, args }) => {
+      const requestConfirm: ToolConfirmHandler = async ({ name, args, message }) => {
         const id = `confirm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         const timeoutMs = 60_000;
         const summary = formatArgsSummary(args);
+        const detailLines: string[] = [];
+        if (message) detailLines.push(`说明：${message}`);
+        if (summary) detailLines.push(summary);
+        const details = detailLines.length > 0 ? detailLines.join('\n') : '（无更多细节）';
         const prompt = [
           `⚠️ 需要确认：${name}`,
           '',
-          summary,
+          details,
           '',
           `回复：允许 ${id}  或  拒绝 ${id}`,
           `（${Math.floor(timeoutMs / 1000)} 秒内有效）`,
@@ -343,4 +347,8 @@ export class DingTalkAdapter implements ChannelAdapter {
     }
   }
 }
+
+
+
+
 

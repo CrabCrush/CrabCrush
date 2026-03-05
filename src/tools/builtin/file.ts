@@ -35,8 +35,19 @@ function isPathSafe(base: string, relativePath: string): boolean {
   if (rel == '') return true;
   return !rel.startsWith('..') && !isAbsolute(rel);
 }
-
-/** 获取 read_file 根目录：环境变量 > YAML 配置 > 默认 ~/.crabcrush */
+async function requestOutOfBasePermission(
+  context: ToolContext,
+  action: 'read_file' | 'list_files',
+  message: string,
+  params: Record<string, unknown>,
+): Promise<ToolResult | null> {
+  if (!context.requestPermission) {
+    return { success: false, content: '路径超出允许范围，需要通道支持权限确认。' };
+  }
+  const allowed = await context.requestPermission({ action, message, params });
+  if (!allowed) return { success: false, content: `用户拒绝执行工具 "${action}"` };
+  return null;
+}\n\n/** 获取 read_file 根目录：环境变量 > YAML 配置 > 默认 ~/.crabcrush */
 export function getFileBasePath(config?: { fileBase?: string }): string {
   return (
     process.env.CRABCRUSH_FILE_BASE
@@ -59,7 +70,7 @@ export function createReadFileTool(config?: { fileBase?: string }): Tool {
         properties: {
           path: {
             type: 'string',
-            description: '相对于根目录（默认 ~/.crabcrush，可配置 tools.fileBase）的文件路径，如 workspace/notes.md 或 config/crabcrush.yaml',
+            description: '相对于根目录（默认 ~/.crabcrush，可配置 tools.fileBase）的文件路径，如 workspace/notes.md；也支持绝对路径（需要运行时权限确认）。',
           },
           maxChars: {
             type: 'number',
@@ -96,7 +107,19 @@ export function createReadFileTool(config?: { fileBase?: string }): Tool {
         };
       }
 
-      const fullPath = resolve(basePath, trimmed);
+
+      if (isAbs) {
+        // 读取 fileBase 之外路径需要运行时权限确认（默认仅本次）。
+        const perm = await requestOutOfBasePermission(
+          context,
+          'read_file',
+          `是否允许读取该文件？\n${trimmed}`,
+          { path: trimmed },
+        );
+        if (perm) return perm;
+      }
+
+      const fullPath = isAbs ? trimmed : resolve(basePath, trimmed.replace(/^\/+/, ''));
 
       try {
         const buf = await readFile(fullPath, { encoding: 'utf-8' });
@@ -166,7 +189,7 @@ export function createListFilesTool(config?: { fileBase?: string }): Tool {
         properties: {
           path: {
             type: 'string',
-            description: '相对于根目录的目录路径，如 workspace 或 . 表示根目录',
+            description: '相对于根目录的目录路径（如 workspace 或 .）；也支持绝对路径（需要运行时权限确认）。',
             default: '.',
           },
           pattern: {
@@ -186,18 +209,31 @@ export function createListFilesTool(config?: { fileBase?: string }): Tool {
     confirmRequired: false,
 
     async execute(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {
-      const pathArg = ((args.path as string) || '.').trim().replace(/^\/+/, '') || '.';
+      const rawPath = ((args.path as string) || '.').trim() || '.';
       const pattern = (args.pattern as string)?.trim() || '';
       const recursive = Boolean(args.recursive);
 
       const basePath = getFileBasePath(config);
       const baseDisplay = basePath.startsWith(homedir()) ? '~' + basePath.slice(homedir().length) : basePath;
 
-      if (!isPathSafe(basePath, pathArg)) {
+      const isAbs = isAbsolute(rawPath);
+      const pathArg = isAbs ? rawPath : rawPath.replace(/^\/+/, '') || '.';
+
+      if (!isAbs && !isPathSafe(basePath, pathArg)) {
         return { success: false, content: `路径不安全，仅允许访问 ${baseDisplay} 下的文件` };
       }
 
-      const dirPath = resolve(basePath, pathArg);
+      if (isAbs) {
+        const perm = await requestOutOfBasePermission(
+          context,
+          'list_files',
+          `是否允许扫描该目录？\n${pathArg}`,
+          { path: pathArg, pattern, recursive },
+        );
+        if (perm) return perm;
+      }
+
+      const dirPath = isAbs ? pathArg : resolve(basePath, pathArg);
       const results: string[] = [];
 
       async function scan(dir: string, relPrefix: string, depth: number): Promise<void> {
@@ -393,4 +429,6 @@ export function createWriteFileTool(config?: { fileBase?: string }): Tool {
 }
 
 export const writeFileTool = createWriteFileTool();
+
+
 

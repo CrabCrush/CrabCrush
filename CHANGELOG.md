@@ -5,6 +5,14 @@
 ---
 
 ## [未发布]
+### 2026-03-05
+
+#### feat: runtime permission requests (request-level) + safer reads
+
+- Add request-level permission prompts (`permission_request`) alongside tool-level `confirmRequired`
+- `browse_url`: prompt before accessing non-loopback URLs (works even when Chromium is already installed)
+- `read_file` / `list_files`: allow paths under `tools.fileBase` by default; require permission prompt for absolute paths outside base
+- Include `kind/message` metadata in confirm events and show it in WebChat/DingTalk confirmations
 
 ### 2026-02-26
 
@@ -396,6 +404,8 @@ WebChat 和核心引擎的完善，从"能跑"到"好用"。
 - CLI 入口：Commander.js
 - TypeScript strict mode 配置
 - GPL-3.0 License
+
+
 
 
 

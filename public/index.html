@@ -647,7 +647,10 @@
       activeConfirm = confirmQueue.shift();
       if (!activeConfirm) return;
       if (confirmTitle) confirmTitle.textContent = `需要确认：${activeConfirm.name || ''}`;
-      if (confirmDesc) confirmDesc.textContent = '该操作可能会修改本地数据，请确认是否继续。';
+      const defaultDesc = activeConfirm.kind === 'permission_request'
+        ? '该操作需要额外权限，请确认是否继续。'
+        : '该操作可能会修改本地数据，请确认是否继续。';
+      if (confirmDesc) confirmDesc.textContent = activeConfirm.message || defaultDesc;
       if (confirmArgs) confirmArgs.textContent = JSON.stringify(activeConfirm.args || {}, null, 2);
       if (confirmOverlay) confirmOverlay.classList.add('visible');
     }
@@ -796,7 +799,7 @@
             messagesEl.appendChild(hint);
           }
         } else if (msg.type === 'confirm') {
-          confirmQueue.push({ id: msg.id, name: msg.name, args: msg.args });
+          confirmQueue.push({ id: msg.id, name: msg.name, args: msg.args, kind: msg.kind, message: msg.message });
           showNextConfirm();
 
         } else if (msg.type === 'tool_call') {
@@ -1009,4 +1012,7 @@
   </script>
 </body>
 </html>
+
+
+
 

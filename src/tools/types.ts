@@ -44,10 +44,21 @@ export interface ToolConfirmRequest {
   args: Record<string, unknown>;
   sessionId: string;
   senderId: string;
+  /** confirmRequired(工具级) 或 permission_request(请求级) */
+  kind?: 'confirm' | 'permission_request';
+  /** 可选说明文案 */
+  message?: string;
 }
 
 /** 工具确认处理器 */
 export type ToolConfirmHandler = (request: ToolConfirmRequest) => Promise<boolean>;
+
+/** 运行时权限请求（请求级） */
+export interface PermissionRequest {
+  action: string;
+  message: string;
+  params?: Record<string, unknown>;
+}
 
 /**
  * 工具执行上下文
@@ -63,6 +74,8 @@ export interface ToolContext {
   userMessage?: string;
   /** 需要确认时的回调（由通道层提供） */
   confirm?: ToolConfirmHandler;
+  /** 运行时权限请求（动态） */
+  requestPermission?: (request: PermissionRequest) => Promise<boolean>;
   /** 审计日志回调（可选） */
   audit?: (event: { type: string; [key: string]: unknown }) => void;
 }
@@ -91,4 +104,9 @@ export interface Tool {
   /** 执行工具 */
   execute(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult>;
 }
+
+
+
+
+
 

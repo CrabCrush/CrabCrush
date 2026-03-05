@@ -14,6 +14,10 @@ import type { Tool, ToolContext, ToolResult } from '../types.js';
 const PAGE_LOAD_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_CHARS = 8000; // 避免返回过多内容给模型
 
+function isLoopbackHost(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  return h === 'localhost' || h === '127.0.0.1' || h === '::1';
+}
 export const browseUrlTool: Tool = {
   definition: {
     name: 'browse_url',
@@ -49,6 +53,21 @@ export const browseUrlTool: Tool = {
       return { success: false, content: 'URL 必须以 http:// 或 https:// 开头' };
     }
 
+    // 请求级权限确认：外部 URL 需要用户明确授权（见 docs/DESIGN/permissions.md）
+    try {
+      const u = new URL(url);
+      const context = _context;
+      if (!isLoopbackHost(u.hostname) && context.requestPermission) {
+        const allowed = await context.requestPermission({
+          action: 'browse_url',
+          message: `是否允许访问该 URL？\n${url}`,
+          params: { url },
+        });
+        if (!allowed) return { success: false, content: '用户拒绝执行工具 "browse_url"' };
+      }
+    } catch {
+      // URL 已在上方做了协议检查，这里解析失败就忽略（后续 page.goto 会报错并返回原因）
+    }
     let browser;
     try {
       browser = await chromium.launch({ headless: true });
@@ -102,3 +121,5 @@ export const browseUrlTool: Tool = {
     }
   },
 };
+
+

@@ -13,6 +13,8 @@
 - `browse_url`: prompt before accessing non-loopback URLs (works even when Chromium is already installed)
 - `read_file` / `list_files`: allow paths under `tools.fileBase` by default; require permission prompt for absolute paths outside base
 - Include `kind/message` metadata in confirm events and show it in WebChat/DingTalk confirmations
+- Fix `file` tool source to remove stray literal `\\n` characters that broke TypeScript parsing
+- Update `read_file` absolute-path test to reflect permission gating (requires channel/runtime support)
 
 ### 2026-02-26
 

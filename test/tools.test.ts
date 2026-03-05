@@ -211,7 +211,7 @@ describe('read_file tool', () => {
     if (process.platform !== 'win32') return;
     const result = await readFileTool.execute({ path: 'C:\\Windows\\System32\\drivers\\etc\\hosts' }, ctx);
     expect(result.success).toBe(false);
-    expect(result.content).toContain('不安全');
+    expect(result.content).toContain('权限确认');
   });
 
   it('rejects disallowed file types', async () => {

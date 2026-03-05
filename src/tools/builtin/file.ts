@@ -47,7 +47,9 @@ async function requestOutOfBasePermission(
   const allowed = await context.requestPermission({ action, message, params });
   if (!allowed) return { success: false, content: `用户拒绝执行工具 "${action}"` };
   return null;
-}\n\n/** 获取 read_file 根目录：环境变量 > YAML 配置 > 默认 ~/.crabcrush */
+}
+
+/** 获取 read_file 根目录：环境变量 > YAML 配置 > 默认 ~/.crabcrush */
 export function getFileBasePath(config?: { fileBase?: string }): string {
   return (
     process.env.CRABCRUSH_FILE_BASE
@@ -95,18 +97,20 @@ export function createReadFileTool(config?: { fileBase?: string }): Tool {
       const basePath = getFileBasePath(config);
       const baseDisplay = basePath.startsWith(homedir()) ? '~' + basePath.slice(homedir().length) : basePath;
 
-      const trimmed = pathArg.trim().replace(/^\/+/, '');
-      if (!isPathSafe(basePath, trimmed)) {
+      const rawPath = pathArg.trim();
+      const isAbs = isAbsolute(rawPath);
+      const trimmed = isAbs ? rawPath : rawPath.replace(/^\/+/, '');
+
+      if (!isAbs && !isPathSafe(basePath, trimmed)) {
         return { success: false, content: `路径不安全，仅允许读取 ${baseDisplay} 下的文件` };
       }
 
       if (!isAllowedExt(trimmed)) {
         return {
           success: false,
-          content: `不支持该文件类型。允许的扩展名：${[...ALLOWED_EXT].join(', ')}`,
+          content: '不支持该文件类型。允许的扩展名：' + [...ALLOWED_EXT].join(', '),
         };
       }
-
 
       if (isAbs) {
         // 读取 fileBase 之外路径需要运行时权限确认（默认仅本次）。
@@ -119,7 +123,7 @@ export function createReadFileTool(config?: { fileBase?: string }): Tool {
         if (perm) return perm;
       }
 
-      const fullPath = isAbs ? trimmed : resolve(basePath, trimmed.replace(/^\/+/, ''));
+      const fullPath = isAbs ? trimmed : resolve(basePath, trimmed);
 
       try {
         const buf = await readFile(fullPath, { encoding: 'utf-8' });

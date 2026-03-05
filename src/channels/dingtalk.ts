@@ -13,6 +13,7 @@
 import { DWClient, TOPIC_ROBOT } from 'dingtalk-stream';
 import type { ChannelAdapter, ChatHandler } from './types.js';
 import type { ToolConfirmHandler } from '../tools/types.js';
+import { BlockStreamer } from './block_streaming.js';
 
 export interface DingTalkConfig {
   clientId: string;
@@ -182,12 +183,29 @@ export class DingTalkAdapter implements ChannelAdapter {
         `[钉钉] ${payload.senderNick}(${payload.senderStaffId}): ${content.length > 50 ? content.slice(0, 50) + '...' : content}`,
       );
 
-      // 先发「正在思考…」给用户即时反馈（钉钉无流式，体感慢）
-      await this.sendReply(payload, '正在思考…');
+      // 钉钉不支持 token 级流式：用 Block Streaming 分片发送，提升体感（DEC-031）
+      let thinkingTimer: NodeJS.Timeout | null = setTimeout(() => {
+        thinkingTimer = null;
+        void this.sendReply(payload, '正在思考…');
+      }, 800);
 
-      // 调用 Agent 获取回复（收集文本 + 工具调用记录）
+      const stopThinking = (): void => {
+        if (thinkingTimer) {
+          clearTimeout(thinkingTimer);
+          thinkingTimer = null;
+        }
+      };
+
+      const streamer = new BlockStreamer({
+        send: async (text) => this.sendReply(payload, text),
+        minChars: 300,
+        maxChars: 1800,
+        flushIntervalMs: 800,
+      });
+
+      // 调用 Agent 获取回复（边收边发 + 工具调用记录）
       // 传入 senderStaffId 用于 Owner 权限判断（DEC-026）
-      let fullContent = '';
+      let streamedAny = false;
       const toolNames: string[] = [];
       const toolResults: string[] = [];
       const requestConfirm: ToolConfirmHandler = async ({ name, args, message }) => {
@@ -236,28 +254,40 @@ export class DingTalkAdapter implements ChannelAdapter {
             continue;
           }
           const chunk = event as { content: string };
-          fullContent += chunk.content;
+          if (chunk.content) {
+            stopThinking();
+            streamedAny = true;
+            streamer.push(chunk.content);
+          }
         }
+        await streamer.flush(true);
       } catch (err) {
-        fullContent = `抱歉，处理消息时出错：${err instanceof Error ? err.message : '未知错误'}`;
+        stopThinking();
+        streamer.close();
+        const msg = err instanceof Error ? err.message : String(err);
+        await this.sendReply(payload, `抱歉，处理消息时出错：${msg}`);
+        this.ack(res);
+        return;
+      } finally {
+        stopThinking();
+        streamer.close();
       }
 
-      if (!fullContent) {
+      if (!streamedAny) {
         if (toolResults.length > 0) {
-          fullContent = toolResults.join('\n');
+          await this.sendReply(payload, toolResults.join('\n'));
         } else {
-          fullContent = '抱歉，我没有生成有效的回复。';
+          await this.sendReply(payload, '抱歉，我没有生成有效的回复。');
         }
       }
 
-      // 若有工具调用，在文首附带提示（与 WebChat 体验一致）
-      if (toolNames.length > 0) {
-        fullContent = `🔧 已调用：${toolNames.join('、')}\n\n${fullContent}`;
+      if (toolResults.length > 0) {
+        const header = toolNames.length > 0
+          ? `🔧 已调用：${toolNames.join('、')}`
+          : '🔧 工具结果摘要：';
+        const summary = `${header}\n\n${toolResults.join('\n')}`;
+        await this.sendReply(payload, summary);
       }
-
-      // 通过 sessionWebhook 发送回复（内部按钉钉限制截断）
-      await this.sendReply(payload, fullContent);
-
       // 确认消息已处理（避免钉钉重复推送）
       this.ack(res);
     } catch (err) {

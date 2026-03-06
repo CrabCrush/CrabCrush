@@ -184,10 +184,12 @@ export class DingTalkAdapter implements ChannelAdapter {
       );
 
       // 钉钉不支持 token 级流式：用 Block Streaming 分片发送，提升体感（DEC-031）
+      let streamedAny = false;
       let thinkingTimer: NodeJS.Timeout | null = setTimeout(() => {
         thinkingTimer = null;
+        if (streamedAny) return;
         void this.sendReply(payload, '正在思考…');
-      }, 800);
+      }, 1200);
 
       const stopThinking = (): void => {
         if (thinkingTimer) {
@@ -198,14 +200,13 @@ export class DingTalkAdapter implements ChannelAdapter {
 
       const streamer = new BlockStreamer({
         send: async (text) => this.sendReply(payload, text),
-        minChars: 300,
+        minChars: 200,
         maxChars: 1800,
-        flushIntervalMs: 800,
+        flushIntervalMs: 600,
       });
 
       // 调用 Agent 获取回复（边收边发 + 工具调用记录）
       // 传入 senderStaffId 用于 Owner 权限判断（DEC-026）
-      let streamedAny = false;
       const toolNames: string[] = [];
       const toolResults: string[] = [];
       const requestConfirm: ToolConfirmHandler = async ({ name, args, message }) => {

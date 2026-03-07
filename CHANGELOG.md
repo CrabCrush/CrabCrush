@@ -17,6 +17,14 @@
 - Fix DingTalk confirmation parsing to correctly support `允许 <id>` / `拒绝 <id>` / `允许 本会话 <id>`
 - Add regression tests for tool plans, DingTalk confirm parsing, search permission gating, and session metadata persistence
 
+#### refactor: centralize intent heuristics and add integration coverage
+
+- Extract file-related intent heuristics into `src/tools/intent.ts` so runtime enforcement and `write_file` guardrails share one implementation
+- Expand the heuristic guardrails to cover common English file/write expressions in addition to Chinese
+- Add Chinese comments explaining the current heuristic trade-off and the longer-term direction of moving authority toward plan approval, previews, and confirms
+- Add WebSocket integration tests for the full WebChat confirm flow and session-scoped confirm reuse
+- Add intent-focused tests for English file checks and English write-file requests
+
 ### 2026-03-05
 
 #### feat: runtime permission requests (request-level) + safer reads

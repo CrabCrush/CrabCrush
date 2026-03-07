@@ -354,6 +354,27 @@ describe('AgentRuntime tool plan', () => {
     expect(finalChunk).toBeTruthy();
   });
 
+  it('also enforces file tools for English file requests', async () => {
+    const runtime = createFileEnforcementRuntime();
+    const events: Array<unknown> = [];
+
+    for await (const event of runtime.chat(
+      'sess-file-en',
+      'Please check whether the file exists, and create it if missing.',
+      undefined,
+      'owner-1',
+      async () => ({ allow: true, scope: 'once' }),
+    )) {
+      events.push(event);
+    }
+
+    const clearEvent = events.find((event) => typeof event === 'object' && event !== null && 'type' in event && (event as { type: string }).type === 'stream_control');
+    const toolCall = events.find((event): event is ToolCallEvent => typeof event === 'object' && event !== null && 'type' in event && (event as { type: string }).type === 'tool_call');
+
+    expect(clearEvent).toBeTruthy();
+    expect(toolCall?.name).toBe('read_file');
+  });
+
   it('allows the model to retry write_file with overwrite=true after an initial conflict', async () => {
     const runtime = createRetryRuntime();
     const events: Array<unknown> = [];

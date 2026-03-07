@@ -19,6 +19,7 @@ import type {
   ToolExecutionPreview,
   PermissionRequest,
 } from '../tools/types.js';
+import { looksLikeFileToolRequest } from '../tools/intent.js';
 import {
   getWorkspacePath,
   ensureWorkspaceDir,
@@ -91,9 +92,6 @@ const TOOL_BLOCK_START = '__TOOL_CALL__\n';
 const TOOL_PLAN_BLOCK_START = '__TOOL_PLAN__\n';
 const TOOL_PLAN_RESULT_BLOCK_START = '__TOOL_PLAN_RESULT__\n';
 const TOOL_BLOCK_END = '\n__END__';
-
-const FILE_TOOL_PATH_PATTERN = /[\w.-]+\.(txt|md|json|ya?ml|csv|log|js|ts|py|html|css|xml|env)\b/i;
-const FILE_TOOL_INTENT_PATTERN = /文件|目录|路径|查找|找找|有没有|是否存在|读取|打开|查看|内容|创建|新建|保存|写入|更新|修改|编辑|重写|覆盖/;
 const FILE_TOOL_REQUIRED_MESSAGE = '当前请求涉及文件状态或文件读写，但模型本轮没有调用必要工具。我需要先通过工具确认后才能继续，请重试。';
 
 function serializeToolBlock(t: { name: string; args: Record<string, unknown>; result: string; success: boolean }): string {
@@ -209,9 +207,9 @@ export class AgentRuntime {
   private shouldRequireFileTool(userMessage: string): boolean {
     if (!this.toolRegistry || this.toolRegistry.size === 0) return false;
     if (!this.toolRegistry.get('read_file') && !this.toolRegistry.get('list_files') && !this.toolRegistry.get('write_file')) return false;
-    const trimmed = userMessage.trim();
-    if (!trimmed) return false;
-    return FILE_TOOL_PATH_PATTERN.test(trimmed) || FILE_TOOL_INTENT_PATTERN.test(trimmed);
+    // 这里只做“是否需要强制先走文件工具”的兜底判断，不把它当成真实语义理解。
+    // 真正可靠的事实来源仍然必须是 read_file / list_files / write_file 的执行结果。
+    return looksLikeFileToolRequest(userMessage);
   }
 
   /**

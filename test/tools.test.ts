@@ -352,6 +352,24 @@ describe('write_file tool', () => {
     expect(result.content).toContain('未包含写文件意图');
   });
 
+  it('accepts English write intent in userMessage', async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'crabcrush-writefile-'));
+    const origBase = process.env.CRABCRUSH_FILE_BASE;
+    process.env.CRABCRUSH_FILE_BASE = tmpDir;
+
+    try {
+      const result = await writeFileTool.execute(
+        { path: 'workspace/summary.md', content: 'hello' },
+        { ...ctx, userMessage: 'Please save this summary to a file' },
+      );
+      expect(result.success).toBe(true);
+      expect(result.content).toContain('已写入');
+    } finally {
+      process.env.CRABCRUSH_FILE_BASE = origBase;
+      rmSync(tmpDir, { recursive: true });
+    }
+  });
+
   it('rejects overwrite when file exists', async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), 'crabcrush-writefile-'));
     const origBase = process.env.CRABCRUSH_FILE_BASE;

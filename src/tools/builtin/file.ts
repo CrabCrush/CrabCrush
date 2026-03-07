@@ -18,6 +18,7 @@ import type {
   ToolExecutionPreview,
   ToolResult,
 } from '../types.js';
+import { hasWriteFileIntent } from '../intent.js';
 
 const DEFAULT_MAX_CHARS = 8000;
 
@@ -377,12 +378,11 @@ export function createWriteFileTool(config?: { fileBase?: string }): Tool {
     async precheck(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult | null> {
       const pathArg = args.path as string;
       const overwrite = Boolean(args.overwrite);
-      const userMessage = (context.userMessage || '').toLowerCase();
-      const allowOverwrite = overwrite;
 
       if (!pathArg || typeof pathArg !== 'string') return null;
-      const writeIntent = /创建|新建|写入|新写|保存|生成文件|写文件|导出|保存为|更新|修改|编辑|改一下|补充|完善/.test(userMessage) || allowOverwrite;
-      if (context.userMessage && !writeIntent) {
+      // 这里的意图判断只是防“模型自作主张写文件”的低成本护栏。
+      // 长期应更多依赖 plan approval + execution preview + confirm，而不是关键词本身。
+      if (context.userMessage && !hasWriteFileIntent(context.userMessage, overwrite)) {
         return {
           success: false,
           content: '当前请求未包含写文件意图，已阻止 write_file。',
@@ -396,7 +396,7 @@ export function createWriteFileTool(config?: { fileBase?: string }): Tool {
       const fullPath = resolve(basePath, trimmed);
       try {
         await access(fullPath);
-        if (!allowOverwrite) {
+        if (!overwrite) {
           return {
             success: false,
             content: `文件已存在：${pathArg}。如需覆盖，请让助手以 overwrite=true 重试，并在确认弹窗中批准覆盖。`,
@@ -416,10 +416,8 @@ export function createWriteFileTool(config?: { fileBase?: string }): Tool {
       const pathArg = args.path as string;
       const content = args.content as string;
       const overwrite = Boolean(args.overwrite);
-      const userMessage = (context.userMessage || '').toLowerCase();
-      const allowOverwrite = overwrite;
-      const writeIntent = /创建|新建|写入|新写|保存|生成文件|写文件|导出|保存为|更新|修改|编辑|改一下|补充|完善/.test(userMessage) || allowOverwrite;
-      if (context.userMessage && !writeIntent) {
+      // execute 里重复做一次，是为了避免绕过 precheck 时失去这层安全兜底。
+      if (context.userMessage && !hasWriteFileIntent(context.userMessage, overwrite)) {
         return { success: false, content: '当前请求未包含写文件意图，已阻止 write_file。' };
       }
 
@@ -449,7 +447,7 @@ export function createWriteFileTool(config?: { fileBase?: string }): Tool {
       try {
         try {
           await access(fullPath);
-          if (!allowOverwrite) {
+          if (!overwrite) {
             return {
               success: false,
               content: `文件已存在：${pathArg}。如需覆盖，请让助手以 overwrite=true 重试，并在确认弹窗中批准覆盖。`,

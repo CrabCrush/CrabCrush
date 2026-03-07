@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { DingTalkAdapter } from '../src/channels/dingtalk.js';
+import { DingTalkAdapter, parseDingTalkConfirmReply } from '../src/channels/dingtalk.js';
 
 describe('DingTalkAdapter', () => {
   it('can be instantiated with config', () => {
@@ -23,6 +23,27 @@ describe('DingTalkAdapter', () => {
 
     adapter.setChatHandler(handler);
     // No assertion needed — should not throw
+  });
+
+  it('parses one-time confirm replies with explicit id', () => {
+    expect(parseDingTalkConfirmReply('允许 confirm-123')).toEqual({
+      action: '允许',
+      scope: 'once',
+      id: 'confirm-123',
+    });
+    expect(parseDingTalkConfirmReply('拒绝 confirm-123')).toEqual({
+      action: '拒绝',
+      scope: 'once',
+      id: 'confirm-123',
+    });
+  });
+
+  it('parses session-scoped confirm replies with explicit id', () => {
+    expect(parseDingTalkConfirmReply('允许 本会话 confirm-456')).toEqual({
+      action: '允许',
+      scope: 'session',
+      id: 'confirm-456',
+    });
   });
 });
 

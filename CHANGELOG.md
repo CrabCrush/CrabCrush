@@ -5,6 +5,18 @@
 ---
 
 ## [未发布]
+### 2026-03-07
+
+#### feat: plan approval + scoped permissions + safer execution flow
+
+- Add plan-level approval before tool execution, with preview metadata persisted into conversation history and rendered in WebChat
+- Extend confirm/request permission flow to support `once` vs `session` scopes, execution previews, grant reuse, and richer audit metadata
+- `search_web`: require runtime permission confirmation before external network access, aligning with `browse_url`
+- Persist real conversation channel/sender metadata when creating sessions, fixing non-WebChat history attribution
+- Strengthen runtime file-safety behavior: when a request depends on file state, retry with explicit tool-use enforcement instead of accepting a plain-text guess
+- Fix DingTalk confirmation parsing to correctly support `允许 <id>` / `拒绝 <id>` / `允许 本会话 <id>`
+- Add regression tests for tool plans, DingTalk confirm parsing, search permission gating, and session metadata persistence
+
 ### 2026-03-05
 
 #### feat: runtime permission requests (request-level) + safer reads

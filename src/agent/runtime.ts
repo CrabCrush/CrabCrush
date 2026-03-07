@@ -12,7 +12,13 @@ import type { ChatMessage, ChatChunk, ChatOptions, ToolCall } from '../models/pr
 import type { ModelRouter } from '../models/router.js';
 import type { ConversationStore } from '../storage/database.js';
 import type { ToolRegistry } from '../tools/registry.js';
-import type { ToolContext, ToolConfirmHandler, PermissionRequest } from '../tools/types.js';
+import type {
+  ConfirmationScope,
+  ToolContext,
+  ToolConfirmHandler,
+  ToolExecutionPreview,
+  PermissionRequest,
+} from '../tools/types.js';
 import {
   getWorkspacePath,
   ensureWorkspaceDir,
@@ -57,6 +63,19 @@ export interface ToolCallEvent {
   success: boolean;
 }
 
+export interface ToolPlanStep {
+  name: string;
+  args: Record<string, unknown>;
+  preview?: ToolExecutionPreview;
+}
+
+export interface ToolPlanEvent {
+  type: 'tool_plan';
+  round: number;
+  summary: string;
+  steps: ToolPlanStep[];
+}
+
 /** 流式控制事件（用于撤回已输出内容） */
 export interface StreamControlEvent {
   type: 'stream_control';
@@ -69,10 +88,24 @@ const MAX_TOOL_ROUNDS = 5;
 
 /** 工具调用持久化格式：供 loadHistory 后前端解析渲染 */
 const TOOL_BLOCK_START = '__TOOL_CALL__\n';
+const TOOL_PLAN_BLOCK_START = '__TOOL_PLAN__\n';
+const TOOL_PLAN_RESULT_BLOCK_START = '__TOOL_PLAN_RESULT__\n';
 const TOOL_BLOCK_END = '\n__END__';
+
+const FILE_TOOL_PATH_PATTERN = /[\w.-]+\.(txt|md|json|ya?ml|csv|log|js|ts|py|html|css|xml|env)\b/i;
+const FILE_TOOL_INTENT_PATTERN = /文件|目录|路径|查找|找找|有没有|是否存在|读取|打开|查看|内容|创建|新建|保存|写入|更新|修改|编辑|重写|覆盖/;
+const FILE_TOOL_REQUIRED_MESSAGE = '当前请求涉及文件状态或文件读写，但模型本轮没有调用必要工具。我需要先通过工具确认后才能继续，请重试。';
 
 function serializeToolBlock(t: { name: string; args: Record<string, unknown>; result: string; success: boolean }): string {
   return TOOL_BLOCK_START + JSON.stringify(t) + TOOL_BLOCK_END;
+}
+
+function serializeToolPlanBlock(t: { round: number; summary: string; steps: ToolPlanStep[] }): string {
+  return TOOL_PLAN_BLOCK_START + JSON.stringify(t) + TOOL_BLOCK_END;
+}
+
+function serializeToolPlanResultBlock(t: { round: number; allowed: boolean }): string {
+  return TOOL_PLAN_RESULT_BLOCK_START + JSON.stringify(t) + TOOL_BLOCK_END;
 }
 
 export function parseToolBlocks(content: string): Array<{ name: string; args: Record<string, unknown>; result: string; success: boolean }> | null {
@@ -95,6 +128,7 @@ export function parseToolBlocks(content: string): Array<{ name: string; args: Re
 
 export class AgentRuntime {
   private sessions = new Map<string, Session>();
+  private sessionPermissionGrants = new Map<string, Set<string>>();
   private router: ModelRouter;
   private basePrompt: string;
   private maxTokens: number;
@@ -129,6 +163,57 @@ export class AgentRuntime {
     return buildSystemPrompt(this.basePrompt, content);
   }
 
+  private getGrantSet(sessionId: string): Set<string> {
+    let grants = this.sessionPermissionGrants.get(sessionId);
+    if (!grants) {
+      grants = new Set<string>();
+      this.sessionPermissionGrants.set(sessionId, grants);
+    }
+    return grants;
+  }
+
+  private hasPermissionGrant(sessionId: string, grantKey: string): boolean {
+    return this.getGrantSet(sessionId).has(grantKey);
+  }
+
+  private rememberPermissionGrant(sessionId: string, grantKey: string, scope: ConfirmationScope): void {
+    if (scope !== 'session') return;
+    this.getGrantSet(sessionId).add(grantKey);
+    this.auditLogger?.({ type: 'permission_grant_saved', sessionId, grantKey, scope });
+  }
+
+  private buildToolPlan(toolCalls: ToolCall[], argsList: Array<Record<string, unknown>>, toolContext: ToolContext): ToolPlanStep[] {
+    return toolCalls.map((tc, index) => {
+      const args = argsList[index] ?? {};
+      const preview = this.toolRegistry?.get(tc.function.name)?.buildConfirmRequest?.(args, toolContext).preview;
+      return { name: tc.function.name, args, preview };
+    });
+  }
+
+  private buildPlanPreview(planSummary: string, planSteps: ToolPlanStep[]): ToolExecutionPreview {
+    const highRiskCount = planSteps.filter((step) => step.preview?.riskLevel === 'high').length;
+    const targets = planSteps.map((step, index) => {
+      const title = step.preview?.title || step.name;
+      return `${index + 1}. ${title}`;
+    });
+    return {
+      title: '批准执行计划',
+      summary: highRiskCount > 0
+        ? `${planSummary}，其中包含 ${highRiskCount} 个高风险步骤。`
+        : planSummary,
+      riskLevel: highRiskCount > 0 ? 'high' : 'medium',
+      targets,
+    };
+  }
+
+  private shouldRequireFileTool(userMessage: string): boolean {
+    if (!this.toolRegistry || this.toolRegistry.size === 0) return false;
+    if (!this.toolRegistry.get('read_file') && !this.toolRegistry.get('list_files') && !this.toolRegistry.get('write_file')) return false;
+    const trimmed = userMessage.trim();
+    if (!trimmed) return false;
+    return FILE_TOOL_PATH_PATTERN.test(trimmed) || FILE_TOOL_INTENT_PATTERN.test(trimmed);
+  }
+
   /**
    * 获取或创建会话
    */
@@ -140,16 +225,11 @@ export class AgentRuntime {
         this.store.ensureConversation(sessionId, channel, senderId);
         const stored = this.store.getRecentMessages(sessionId, this.contextWindow);
         messages = stored
-          .filter((m) => !(m.role === 'assistant' && m.content.startsWith(TOOL_BLOCK_START)))
+          .filter((m) => !(m.role === 'assistant' && (m.content.startsWith(TOOL_BLOCK_START) || m.content.startsWith(TOOL_PLAN_BLOCK_START) || m.content.startsWith(TOOL_PLAN_RESULT_BLOCK_START))))
           .map((m) => ({ role: m.role as ChatMessage['role'], content: m.content }));
       }
 
-      session = {
-        id: sessionId,
-        messages,
-        createdAt: Date.now(),
-        lastActiveAt: Date.now(),
-      };
+      session = { id: sessionId, messages, createdAt: Date.now(), lastActiveAt: Date.now() };
       this.sessions.set(sessionId, session);
     }
     session.lastActiveAt = Date.now();
@@ -170,18 +250,14 @@ export class AgentRuntime {
     signal?: AbortSignal,
     senderId?: string,
     confirmToolCall?: ToolConfirmHandler,
-  ): AsyncIterable<ChatChunk | ToolCallEvent | StreamControlEvent> {
-    const session = this.getOrCreateSession(sessionId);
+    channel = 'webchat',
+  ): AsyncIterable<ChatChunk | ToolCallEvent | ToolPlanEvent | StreamControlEvent> {
+    const session = this.getOrCreateSession(sessionId, channel, senderId ?? '');
 
     // 记录用户消息
     session.messages.push({ role: 'user', content: userMessage });
     this.store?.saveMessage(sessionId, 'user', userMessage);
-    this.auditLogger?.({
-      type: 'chat_input',
-      sessionId,
-      senderId: senderId ?? sessionId,
-      length: userMessage.length,
-    });
+    this.auditLogger?.({ type: 'chat_input', sessionId, senderId: senderId ?? sessionId, length: userMessage.length });
 
     // 解析 system prompt（含工作区注入）
     const systemPrompt = await this.resolveSystemPrompt();
@@ -191,23 +267,21 @@ export class AgentRuntime {
     const accumulatedToolCalls: Array<{ name: string; args: Record<string, unknown>; result: string; success: boolean }> = [];
     let stopAfterToolRound = false;
     let stopReason: string | null = null;
+    let fileToolReminderUsed = false;
 
     while (toolRound <= MAX_TOOL_ROUNDS) {
       // 滑动窗口
       const recentMessages = session.messages.slice(-this.contextWindow);
+      const toolEnforcementHint = fileToolReminderUsed
+        ? '\n【工具强制要求】当前用户请求涉及文件状态或文件读写。你必须优先调用 read_file / list_files / write_file 等工具完成检查或写入，不能直接口头声称文件存在、已创建或已更新。'
+        : '';
+      const messages: ChatMessage[] = [{ role: 'system', content: systemPrompt + toolEnforcementHint }, ...recentMessages];
 
-      const messages: ChatMessage[] = [
-        { role: 'system', content: systemPrompt },
-        ...recentMessages,
-      ];
-
-      // 调试日志
       if (this.debug) {
         const historyCount = recentMessages.length;
         const totalCount = session.messages.length;
         console.log(
-          `[Context] 会话 ${sessionId.slice(0, 8)}... | ` +
-          `总消息 ${totalCount} 条, 发送 ${historyCount} 条 (窗口 ${this.contextWindow})` +
+          `[Context] 会话 ${sessionId.slice(0, 8)}... | 总消息 ${totalCount} 条, 发送 ${historyCount} 条 (窗口 ${this.contextWindow})` +
           (toolRound > 0 ? ` | 工具调用第 ${toolRound} 轮` : ''),
         );
         for (const m of recentMessages) {
@@ -218,11 +292,7 @@ export class AgentRuntime {
 
       // 构建 chatOptions（带工具定义）
       const isOwner = this.isOwner(senderId);
-      const chatOptions: ChatOptions = {
-        maxTokens: this.maxTokens,
-        signal,
-      };
-
+      const chatOptions: ChatOptions = { maxTokens: this.maxTokens, signal };
       // 如果有注册的工具，传给模型
       if (this.toolRegistry && this.toolRegistry.size > 0) {
         chatOptions.tools = this.toolRegistry.getDefinitionsForModel(isOwner);
@@ -235,12 +305,8 @@ export class AgentRuntime {
 
       try {
         for await (const chunk of this.router.chat(messages, chatOptions)) {
-          if (chunk.toolCalls) {
-            toolCalls = chunk.toolCalls;
-          }
-          if (chunk.content) {
-            fullContent += chunk.content;
-          }
+          if (chunk.toolCalls) toolCalls = chunk.toolCalls;
+          if (chunk.content) fullContent += chunk.content;
           // 只 yield ChatChunk 类型（文本内容）
           yield chunk;
           if (chunk.content) streamedContent = true;
@@ -255,6 +321,25 @@ export class AgentRuntime {
 
       // 情况 1: 模型返回了纯文本回复（没有工具调用），正常结束
       if (!toolCalls || toolCalls.length === 0) {
+        if (toolRound === 0 && this.shouldRequireFileTool(userMessage)) {
+          if (!fileToolReminderUsed) {
+            fileToolReminderUsed = true;
+            if (streamedContent || fullContent) {
+              yield { type: 'stream_control', action: 'clear_last', reason: 'tool_calls' };
+            }
+            continue;
+          }
+
+          if (streamedContent || fullContent) {
+            yield { type: 'stream_control', action: 'clear_last', reason: 'tool_calls' };
+          }
+          session.messages.push({ role: 'assistant', content: FILE_TOOL_REQUIRED_MESSAGE });
+          this.store?.saveMessage(sessionId, 'assistant', FILE_TOOL_REQUIRED_MESSAGE);
+          yield { content: FILE_TOOL_REQUIRED_MESSAGE, done: false };
+          yield { content: '', done: true };
+          break;
+        }
+
         if (fullContent) {
           session.messages.push({ role: 'assistant', content: fullContent });
           // 若有工具调用，先持久化工具块供刷新后展示
@@ -269,37 +354,52 @@ export class AgentRuntime {
 
       // 情况 2: 模型请求了工具调用
       toolRound++;
-
       if (this.debug) {
         console.log(`[Tools] 模型请求 ${toolCalls.length} 个工具调用:`);
-        for (const tc of toolCalls) {
-          console.log(`  → ${tc.function.name}(${tc.function.arguments})`);
-        }
+        for (const tc of toolCalls) console.log(`  → ${tc.function.name}(${tc.function.arguments})`);
       }
 
       if (streamedContent) {
         yield { type: 'stream_control', action: 'clear_last', reason: 'tool_calls' };
-        streamedContent = false;
       }
 
-      // 先记录 assistant 的工具调用消息
-      const assistantMsg: ChatMessage = {
-        role: 'assistant',
-        content: '',
-        tool_calls: toolCalls,
-      };
-      session.messages.push(assistantMsg);
 
       // 逐个执行工具
       const requestPermission = confirmToolCall
-        ? async (req: PermissionRequest) => confirmToolCall({
-          name: req.action,
-          args: req.params ?? {},
-          sessionId,
-          senderId: senderId ?? sessionId,
-          kind: 'permission_request',
-          message: req.message,
-        })
+        ? async (req: PermissionRequest) => {
+          if (req.grantKey && this.hasPermissionGrant(sessionId, req.grantKey)) {
+            this.auditLogger?.({ type: 'permission_request_reused', sessionId, senderId: senderId ?? sessionId, action: req.action, grantKey: req.grantKey });
+            return true;
+          }
+
+          const decision = await confirmToolCall({
+            name: req.action,
+            args: req.params ?? {},
+            sessionId,
+            senderId: senderId ?? sessionId,
+            kind: 'permission_request',
+            message: req.message,
+            preview: req.preview,
+            scopeOptions: req.scopeOptions,
+            defaultScope: req.defaultScope,
+            grantKey: req.grantKey,
+          });
+
+          this.auditLogger?.({
+            type: 'permission_request_result',
+            sessionId,
+            senderId: senderId ?? sessionId,
+            action: req.action,
+            allowed: decision.allow,
+            scope: decision.scope,
+            grantKey: req.grantKey,
+          });
+
+          if (decision.allow && req.grantKey) {
+            this.rememberPermissionGrant(sessionId, req.grantKey, decision.scope ?? req.defaultScope ?? 'once');
+          }
+          return decision.allow;
+        }
         : undefined;
 
       const toolContext: ToolContext = {
@@ -308,45 +408,90 @@ export class AgentRuntime {
         sessionId,
         confirm: confirmToolCall,
         requestPermission,
+        hasPermissionGrant: (grantKey: string) => this.hasPermissionGrant(sessionId, grantKey),
+        rememberPermissionGrant: (grantKey: string, scope: ConfirmationScope) => this.rememberPermissionGrant(sessionId, grantKey, scope),
         audit: this.auditLogger,
         userMessage,
       };
 
+      const parsedArgsList: Array<Record<string, unknown>> = [];
       for (const tc of toolCalls) {
-        let args: Record<string, unknown> = {};
         try {
-          args = JSON.parse(tc.function.arguments);
+          parsedArgsList.push(JSON.parse(tc.function.arguments));
         } catch {
-          // 模型返回的参数格式不正确
+          parsedArgsList.push({});
         }
+      }
 
-        this.auditLogger?.({
-          type: 'tool_call',
+      const planSteps = this.buildToolPlan(toolCalls, parsedArgsList, toolContext);
+      const planSummary = planSteps.length === 1 ? '准备执行 1 个步骤' : `准备执行 ${planSteps.length} 个步骤`;
+      this.auditLogger?.({ type: 'tool_plan', sessionId, senderId: senderId ?? sessionId, round: toolRound, steps: planSteps.map((s) => s.name) });
+      this.store?.saveMessage(
+        sessionId,
+        'assistant',
+        serializeToolPlanBlock({ round: toolRound, summary: planSummary, steps: planSteps }),
+      );
+      yield { type: 'tool_plan', round: toolRound, summary: planSummary, steps: planSteps };
+
+      if (confirmToolCall) {
+        const planDecision = await confirmToolCall({
+          name: 'execute_plan',
+          args: {
+            round: toolRound,
+            steps: planSteps.map((step, index) => ({ index: index + 1, name: step.name, args: step.args })),
+          },
           sessionId,
           senderId: senderId ?? sessionId,
-          name: tc.function.name,
+          kind: 'plan',
+          message: '即将执行上述计划。批准后才会开始逐步执行和确认。',
+          preview: this.buildPlanPreview(planSummary, planSteps),
+          scopeOptions: ['once'],
+          defaultScope: 'once',
         });
+
+        this.auditLogger?.({
+          type: 'tool_plan_result',
+          sessionId,
+          senderId: senderId ?? sessionId,
+          allowed: planDecision.allow,
+          round: toolRound,
+        });
+        this.store?.saveMessage(
+          sessionId,
+          'assistant',
+          serializeToolPlanResultBlock({ round: toolRound, allowed: planDecision.allow }),
+        );
+
+        if (!planDecision.allow) {
+          const cancelMsg = '工具未执行：用户拒绝批准本次执行计划。';
+          session.messages.push({ role: 'assistant', content: cancelMsg });
+          this.store?.saveMessage(sessionId, 'assistant', cancelMsg);
+          yield { content: cancelMsg, done: false };
+          yield { content: '', done: true };
+          break;
+        }
+      }
+
+      const assistantMsg: ChatMessage = { role: 'assistant', content: '', tool_calls: toolCalls };
+      session.messages.push(assistantMsg);
+
+      for (let index = 0; index < toolCalls.length; index++) {
+        const tc = toolCalls[index];
+        const args = parsedArgsList[index] ?? {};
+
+        this.auditLogger?.({ type: 'tool_call', sessionId, senderId: senderId ?? sessionId, name: tc.function.name });
 
         const result = this.toolRegistry
           ? await this.toolRegistry.execute(tc.function.name, args, toolContext)
           : { success: false, content: '工具系统未启用' };
 
-        this.auditLogger?.({
-          type: 'tool_result',
-          sessionId,
-          senderId: senderId ?? sessionId,
-          name: tc.function.name,
-          success: result.success,
-        });
+        this.auditLogger?.({ type: 'tool_result', sessionId, senderId: senderId ?? sessionId, name: tc.function.name, success: result.success });
 
         if (!result.success) {
           const msg = result.content || '';
           if (msg.includes('用户拒绝执行工具') || msg.includes('确认超时') || msg.includes('需要用户确认')) {
             stopAfterToolRound = true;
             stopReason = msg;
-          } else if (tc.function.name === 'write_file') {
-            stopAfterToolRound = true;
-            stopReason = msg || 'write_file 未执行。';
           }
         }
 
@@ -354,35 +499,17 @@ export class AgentRuntime {
           console.log(`  ← ${tc.function.name}: ${result.success ? '✓' : '✗'} ${result.content.slice(0, 100)}`);
         }
 
-        // yield 工具调用事件给 UI
-        yield {
-          type: 'tool_call' as const,
-          name: tc.function.name,
-          args,
-          result: result.content,
-          success: result.success,
-        };
+        yield { type: 'tool_call', name: tc.function.name, args, result: result.content, success: result.success };
+        accumulatedToolCalls.push({ name: tc.function.name, args, result: result.content, success: result.success });
 
-        accumulatedToolCalls.push({
-          name: tc.function.name,
-          args,
-          result: result.content,
-          success: result.success,
-        });
-
-        // 把工具结果加入消息历史，供下一轮模型调用
-        const toolMsg: ChatMessage = {
-          role: 'tool',
-          content: result.content,
-          tool_call_id: tc.id,
-        };
+        const toolMsg: ChatMessage = { role: 'tool', content: result.content, tool_call_id: tc.id };
         session.messages.push(toolMsg);
       }
 
       if (stopAfterToolRound) {
         // 用户拒绝/超时确认时，不再继续让模型生成回复，避免误导性响应
         if (accumulatedToolCalls.length > 0) {
-          const toolBlockContent = accumulatedToolCalls.map((t) => serializeToolBlock(t)).join('\\n');
+          const toolBlockContent = accumulatedToolCalls.map((t) => serializeToolBlock(t)).join('\n');
           this.store?.saveMessage(sessionId, 'assistant', toolBlockContent);
         }
         const cancelMsg = stopReason ? '工具未执行：' + stopReason : '已取消该操作。';
@@ -392,8 +519,6 @@ export class AgentRuntime {
         yield { content: '', done: true };
         break;
       }
-
-      // 继续循环，让模型根据工具结果生成最终回复
     }
 
     // 内存中保持滑动窗口
@@ -407,7 +532,7 @@ export class AgentRuntime {
    * 未配置 ownerIds 时默认所有人都是 owner（单用户场景）
    */
   private isOwner(senderId?: string): boolean {
-    if (this.ownerIds.size === 0) return true; // 未配置 = 单用户模式
+    if (this.ownerIds.size === 0) return true;
     if (!senderId) return false;
     return this.ownerIds.has(senderId);
   }
@@ -449,7 +574,5 @@ export class AgentRuntime {
     return this.sessions.size;
   }
 }
-
-
 
 

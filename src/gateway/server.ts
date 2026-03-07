@@ -3,8 +3,8 @@ import { dirname, join } from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyWebSocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
-import type { AgentRuntime, ToolCallEvent, StreamControlEvent } from '../agent/runtime.js';
-import type { ToolConfirmHandler } from '../tools/types.js';
+import type { AgentRuntime, ToolCallEvent, ToolPlanEvent, StreamControlEvent } from '../agent/runtime.js';
+import type { ToolConfirmDecision, ToolConfirmHandler } from '../tools/types.js';
 import { estimateCost } from '../models/pricing.js';
 import type { ChatChunk } from '../models/provider.js';
 
@@ -26,14 +26,9 @@ export interface GatewayOptions {
  * 用于测试时注入请求，不需要占用端口
  */
 export function createGateway(options: GatewayOptions = {}): FastifyInstance {
-  const app = Fastify({
-    logger: options.logger ?? true,
-  });
+  const app = Fastify({ logger: options.logger ?? true });
 
-  // 健康检查
-  app.get('/health', async () => {
-    return { status: 'ok' };
-  });
+  app.get('/health', async () => ({ status: 'ok' }));
 
   // 统一错误格式
   app.setErrorHandler((err, _request, reply) => {
@@ -58,7 +53,6 @@ export async function startGateway(options: GatewayOptions = {}) {
   const port = options.port ?? 18790;
   const host = options.bind === 'all' ? '0.0.0.0' : '127.0.0.1';
   const app = createGateway(options);
-
   const audit = options.auditLogger;
 
   // 简单限流（WebSocket chat 消息）
@@ -80,7 +74,7 @@ export async function startGateway(options: GatewayOptions = {}) {
   // Token 校验辅助函数
   const token = options.token;
   const validateToken = (query: Record<string, unknown>): boolean => {
-    if (!token) return true; // 未设置 token 则不校验
+    if (!token) return true;
     return (query as Record<string, string>).token === token;
   };
 
@@ -103,31 +97,35 @@ export async function startGateway(options: GatewayOptions = {}) {
       let currentAbort: AbortController | null = null;
 
       const pendingConfirms = new Map<string, {
-        resolve: (allow: boolean) => void;
+        resolve: (decision: ToolConfirmDecision) => void;
         timeout: NodeJS.Timeout;
         name: string;
       }>();
 
-      const requestConfirm: ToolConfirmHandler = async ({ name, args, kind, message }) => {
+      const requestConfirm: ToolConfirmHandler = async (request) => {
         const id = `confirm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         const timeoutMs = 30_000;
-        audit?.({ type: 'tool_confirm_request', sessionId, name });
+        audit?.({ type: 'tool_confirm_request', sessionId, name: request.name, kind: request.kind, grantKey: request.grantKey });
 
-        return await new Promise<boolean>((resolve) => {
+        return await new Promise<ToolConfirmDecision>((resolve) => {
           const timeout = setTimeout(() => {
             pendingConfirms.delete(id);
-            resolve(false);
+            resolve({ allow: false, scope: request.defaultScope });
           }, timeoutMs);
 
-          pendingConfirms.set(id, { resolve, timeout, name });
+          pendingConfirms.set(id, { resolve, timeout, name: request.name });
           if (socket.readyState === 1) {
             socket.send(JSON.stringify({
               type: 'confirm',
               id,
-              name,
-              args,
-              kind,
-              message,
+              name: request.name,
+              args: request.args,
+              kind: request.kind,
+              message: request.message,
+              preview: request.preview,
+              scopeOptions: request.scopeOptions,
+              defaultScope: request.defaultScope,
+              grantKey: request.grantKey,
               timeoutMs,
             }));
           }
@@ -136,9 +134,7 @@ export async function startGateway(options: GatewayOptions = {}) {
 
       // WebSocket ping/pong 保活
       const pingInterval = setInterval(() => {
-        if (socket.readyState === 1) {
-          socket.ping();
-        }
+        if (socket.readyState === 1) socket.ping();
       }, 30_000);
 
       socket.on('close', () => {
@@ -147,7 +143,7 @@ export async function startGateway(options: GatewayOptions = {}) {
         currentAbort?.abort();
         for (const [id, pending] of pendingConfirms.entries()) {
           clearTimeout(pending.timeout);
-          pending.resolve(false);
+          pending.resolve({ allow: false });
           pendingConfirms.delete(id);
         }
       });
@@ -157,18 +153,19 @@ export async function startGateway(options: GatewayOptions = {}) {
           const msg = JSON.parse(raw.toString());
 
           // 客户端可以指定 sessionId（用于重连恢复会话）
-          if (msg.sessionId) {
-            sessionId = msg.sessionId;
-          }
+          if (msg.sessionId) sessionId = msg.sessionId;
 
           if (msg.type === 'confirm_result') {
             const pending = pendingConfirms.get(msg.id);
             if (pending) {
               clearTimeout(pending.timeout);
               pendingConfirms.delete(msg.id);
-              const allow = Boolean(msg.allow);
-              audit?.({ type: 'tool_confirm_result', sessionId, name: pending.name, allowed: allow });
-              pending.resolve(allow);
+              const decision: ToolConfirmDecision = {
+                allow: Boolean(msg.allow),
+                scope: msg.scope === 'session' ? 'session' : 'once',
+              };
+              audit?.({ type: 'tool_confirm_result', sessionId, name: pending.name, allowed: decision.allow, scope: decision.scope });
+              pending.resolve(decision);
             }
             return;
           }
@@ -185,13 +182,7 @@ export async function startGateway(options: GatewayOptions = {}) {
             const offset = typeof msg.offset === 'number' ? msg.offset : 0;
             const history = agent.getHistory(sessionId, limit, offset);
             const hasMore = history.length >= limit;
-            socket.send(JSON.stringify({
-              type: 'history',
-              sessionId,
-              messages: history,
-              offset,
-              hasMore,
-            }));
+            socket.send(JSON.stringify({ type: 'history', sessionId, messages: history, offset, hasMore }));
             return;
           }
 
@@ -207,9 +198,7 @@ export async function startGateway(options: GatewayOptions = {}) {
           if (msg.type === 'stop') {
             currentAbort?.abort();
             currentAbort = null;
-            if (socket.readyState === 1) {
-              socket.send(JSON.stringify({ type: 'done' }));
-            }
+            if (socket.readyState === 1) socket.send(JSON.stringify({ type: 'done' }));
             return;
           }
 
@@ -221,38 +210,34 @@ export async function startGateway(options: GatewayOptions = {}) {
               return;
             }
 
-            audit?.({
-              type: 'chat_request',
-              sessionId,
-              senderId: sessionId,
-              ip,
-              length: String(msg.content).length,
-            });
-
-            // 中断上一个进行中的请求（如果有）
+            audit?.({ type: 'chat_request', sessionId, senderId: sessionId, ip, length: String(msg.content).length });
             currentAbort?.abort();
-
             const abort = new AbortController();
+            // 中断上一个进行中的请求（如果有）
             currentAbort = abort;
 
             // 发送 sessionId 给客户端
-            socket.send(JSON.stringify({
-              type: 'session',
-              sessionId,
-            }));
+            socket.send(JSON.stringify({ type: 'session', sessionId }));
 
             try {
               // 流式回复（支持 ChatChunk 和 ToolCallEvent 两种事件）
               // WebChat 用 sessionId 作为 senderId（DEC-026 Owner 判断）
-              for await (const event of agent.chat(sessionId, msg.content, abort.signal, sessionId, requestConfirm)) {
+              for await (const event of agent.chat(sessionId, msg.content, abort.signal, sessionId, requestConfirm, 'webchat')) {
                 if (socket.readyState !== 1) break;
 
                 if ('type' in event && (event as StreamControlEvent).type === 'stream_control') {
                   const ctrl = event as StreamControlEvent;
+                  socket.send(JSON.stringify({ type: 'stream_control', action: ctrl.action, reason: ctrl.reason }));
+                  continue;
+                }
+
+                if ('type' in event && (event as ToolPlanEvent).type === 'tool_plan') {
+                  const planEvent = event as ToolPlanEvent;
                   socket.send(JSON.stringify({
-                    type: 'stream_control',
-                    action: ctrl.action,
-                    reason: ctrl.reason,
+                    type: 'tool_plan',
+                    round: planEvent.round,
+                    summary: planEvent.summary,
+                    steps: planEvent.steps,
                   }));
                   continue;
                 }
@@ -275,18 +260,12 @@ export async function startGateway(options: GatewayOptions = {}) {
                 if (chunk.done) {
                   // 若有 toolCalls 表示工具调用中，不发送 done，避免客户端提前结束 streaming 导致后续自然语言回复不展示
                   if (chunk.toolCalls && chunk.toolCalls.length > 0) {
-                    if (chunk.content) {
-                      socket.send(JSON.stringify({ type: 'chunk', content: chunk.content }));
-                    }
+                    if (chunk.content) socket.send(JSON.stringify({ type: 'chunk', content: chunk.content }));
                     continue;
                   }
                   let costInfo: { formatted: string } | null = null;
                   if (chunk.usage && chunk.model) {
-                    costInfo = estimateCost(
-                      chunk.model,
-                      chunk.usage.promptTokens,
-                      chunk.usage.completionTokens,
-                    );
+                    costInfo = estimateCost(chunk.model, chunk.usage.promptTokens, chunk.usage.completionTokens);
                   }
                   socket.send(JSON.stringify({
                     type: 'done',
@@ -295,10 +274,7 @@ export async function startGateway(options: GatewayOptions = {}) {
                     cost: costInfo?.formatted,
                   }));
                 } else {
-                  socket.send(JSON.stringify({
-                    type: 'chunk',
-                    content: chunk.content,
-                  }));
+                  socket.send(JSON.stringify({ type: 'chunk', content: chunk.content }));
                 }
               }
             } catch (err) {
@@ -307,28 +283,17 @@ export async function startGateway(options: GatewayOptions = {}) {
                 socket.send(JSON.stringify({ type: 'done' }));
                 return;
               }
-
               const message = err instanceof Error ? err.message : '未知错误';
               app.log.error({ err }, 'Chat 处理失败');
-              socket.send(JSON.stringify({
-                type: 'error',
-                message,
-              }));
+              socket.send(JSON.stringify({ type: 'error', message }));
             } finally {
-              if (currentAbort === abort) {
-                currentAbort = null;
-              }
+              if (currentAbort === abort) currentAbort = null;
             }
           }
         } catch (err) {
           const message = err instanceof Error ? err.message : '消息格式错误';
           app.log.error({ err }, 'WebSocket 消息解析失败');
-          if (socket.readyState === 1) {
-            socket.send(JSON.stringify({
-              type: 'error',
-              message,
-            }));
-          }
+          if (socket.readyState === 1) socket.send(JSON.stringify({ type: 'error', message }));
         }
       });
     });
@@ -359,16 +324,8 @@ export async function startGateway(options: GatewayOptions = {}) {
   }
 
   const publicDir = join(__dirname, '../../public');
-  await app.register(fastifyStatic, {
-    root: publicDir,
-    prefix: '/',
-  });
-
+  await app.register(fastifyStatic, { root: publicDir, prefix: '/' });
   await app.listen({ port, host });
-
   return app;
 }
-
-
-
 

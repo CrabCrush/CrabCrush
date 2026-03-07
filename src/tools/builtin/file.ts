@@ -11,7 +11,13 @@ import { readFile, readdir, writeFile, access } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';
 import { resolve, join, relative, dirname, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
-import type { Tool, ToolContext, ToolResult } from '../types.js';
+import type {
+  Tool,
+  ToolConfirmRequest,
+  ToolContext,
+  ToolExecutionPreview,
+  ToolResult,
+} from '../types.js';
 
 const DEFAULT_MAX_CHARS = 8000;
 
@@ -32,30 +38,62 @@ function isPathSafe(base: string, relativePath: string): boolean {
   const resolvedBase = resolve(base);
   const resolved = resolve(base, relativePath);
   const rel = relative(resolvedBase, resolved);
-  if (rel == '') return true;
+  if (rel === '') return true;
   return !rel.startsWith('..') && !isAbsolute(rel);
 }
+
+function previewForPath(title: string, summary: string, target: string, riskLevel: 'medium' | 'high' = 'medium'): ToolExecutionPreview {
+  return {
+    title,
+    summary,
+    riskLevel,
+    targets: [target],
+  };
+}
+
+function getDirectoryGrantKey(action: 'read_file' | 'write_file', fullPath: string): string {
+  return `file:${action}:${dirname(fullPath)}`;
+}
+
+function getListGrantKey(fullPath: string): string {
+  return `file:list:${fullPath}`;
+}
+
 async function requestOutOfBasePermission(
   context: ToolContext,
   action: 'read_file' | 'list_files',
+  fullPath: string,
   message: string,
   params: Record<string, unknown>,
 ): Promise<ToolResult | null> {
+  const grantKey = action === 'read_file' ? getDirectoryGrantKey('read_file', fullPath) : getListGrantKey(fullPath);
+  if (context.hasPermissionGrant?.(grantKey)) {
+    return null;
+  }
   if (!context.requestPermission) {
     return { success: false, content: '路径超出允许范围，需要通道支持权限确认。' };
   }
-  const allowed = await context.requestPermission({ action, message, params });
+  const allowed = await context.requestPermission({
+    action,
+    message,
+    params,
+    grantKey,
+    scopeOptions: ['once', 'session'],
+    defaultScope: 'once',
+    preview: previewForPath(
+      action === 'read_file' ? '读取文件' : '扫描目录',
+      action === 'read_file' ? '该操作将读取 fileBase 之外的本地文件。' : '该操作将扫描 fileBase 之外的目录结构。',
+      fullPath,
+      'medium',
+    ),
+  });
   if (!allowed) return { success: false, content: `用户拒绝执行工具 "${action}"` };
   return null;
 }
 
 /** 获取 read_file 根目录：环境变量 > YAML 配置 > 默认 ~/.crabcrush */
 export function getFileBasePath(config?: { fileBase?: string }): string {
-  return (
-    process.env.CRABCRUSH_FILE_BASE
-    ?? config?.fileBase
-    ?? join(homedir(), '.crabcrush')
-  );
+  return process.env.CRABCRUSH_FILE_BASE ?? config?.fileBase ?? join(homedir(), '.crabcrush');
 }
 
 /**
@@ -96,7 +134,6 @@ export function createReadFileTool(config?: { fileBase?: string }): Tool {
 
       const basePath = getFileBasePath(config);
       const baseDisplay = basePath.startsWith(homedir()) ? '~' + basePath.slice(homedir().length) : basePath;
-
       const rawPath = pathArg.trim();
       const isAbs = isAbsolute(rawPath);
       const trimmed = isAbs ? rawPath : rawPath.replace(/^\/+/, '');
@@ -112,18 +149,18 @@ export function createReadFileTool(config?: { fileBase?: string }): Tool {
         };
       }
 
+      const fullPath = isAbs ? trimmed : resolve(basePath, trimmed);
       if (isAbs) {
         // 读取 fileBase 之外路径需要运行时权限确认（默认仅本次）。
         const perm = await requestOutOfBasePermission(
           context,
           'read_file',
+          fullPath,
           `是否允许读取该文件？\n${trimmed}`,
           { path: trimmed },
         );
         if (perm) return perm;
       }
-
-      const fullPath = isAbs ? trimmed : resolve(basePath, trimmed);
 
       try {
         const buf = await readFile(fullPath, { encoding: 'utf-8' });
@@ -140,15 +177,9 @@ export function createReadFileTool(config?: { fileBase?: string }): Tool {
         };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        if (msg.includes('ENOENT')) {
-          return { success: false, content: `文件不存在：${pathArg}` };
-        }
-        if (msg.includes('EACCES')) {
-          return { success: false, content: `无读取权限：${pathArg}` };
-        }
-        if (msg.includes('EISDIR')) {
-          return { success: false, content: `路径是目录，不是文件：${pathArg}` };
-        }
+        if (msg.includes('ENOENT')) return { success: false, content: `文件不存在：${pathArg}` };
+        if (msg.includes('EACCES')) return { success: false, content: `无读取权限：${pathArg}` };
+        if (msg.includes('EISDIR')) return { success: false, content: `路径是目录，不是文件：${pathArg}` };
         return { success: false, content: `读取失败：${msg}` };
       }
     },
@@ -219,7 +250,6 @@ export function createListFilesTool(config?: { fileBase?: string }): Tool {
 
       const basePath = getFileBasePath(config);
       const baseDisplay = basePath.startsWith(homedir()) ? '~' + basePath.slice(homedir().length) : basePath;
-
       const isAbs = isAbsolute(rawPath);
       const pathArg = isAbs ? rawPath : rawPath.replace(/^\/+/, '') || '.';
 
@@ -227,17 +257,18 @@ export function createListFilesTool(config?: { fileBase?: string }): Tool {
         return { success: false, content: `路径不安全，仅允许访问 ${baseDisplay} 下的文件` };
       }
 
+      const dirPath = isAbs ? pathArg : resolve(basePath, pathArg);
       if (isAbs) {
         const perm = await requestOutOfBasePermission(
           context,
           'list_files',
+          dirPath,
           `是否允许扫描该目录？\n${pathArg}`,
           { path: pathArg, pattern, recursive },
         );
         if (perm) return perm;
       }
 
-      const dirPath = isAbs ? pathArg : resolve(basePath, pathArg);
       const results: string[] = [];
 
       async function scan(dir: string, relPrefix: string, depth: number): Promise<void> {
@@ -253,7 +284,7 @@ export function createListFilesTool(config?: { fileBase?: string }): Tool {
             if (recursive) {
               await scan(resolve(dir, e.name), relPath, depth + 1);
             } else if (!pattern) {
-              results.push(relPath + '/'); // 标记为目录，便于用户继续 list_files
+              results.push(relPath + '/');
             }
           }
         }
@@ -298,7 +329,7 @@ export function createWriteFileTool(config?: { fileBase?: string }): Tool {
   return {
     definition: {
       name: 'write_file',
-      description: '将内容写入本地文件。当用户要求「保存」「写入」「创建文件」「修改 XXX 文件」时调用。仅可写入配置的根目录下（默认 ~/.crabcrush）。若文件已存在则覆盖。',
+      description: '将内容写入本地文件。当用户要求「保存」「写入」「创建文件」「修改/更新现有文件」时调用。仅可写入配置的根目录下（默认 ~/.crabcrush）。若目标文件已存在，必须设置 overwrite=true，之后再由确认流程批准覆盖。',
       parameters: {
         type: 'object',
         properties: {
@@ -312,7 +343,7 @@ export function createWriteFileTool(config?: { fileBase?: string }): Tool {
           },
           overwrite: {
             type: 'boolean',
-            description: '是否允许覆盖已存在文件，默认 false',
+            description: '是否允许覆盖已存在文件。创建新文件时通常为 false；修改或更新已有文件时必须设为 true。默认 false',
             default: false,
           },
         },
@@ -322,15 +353,35 @@ export function createWriteFileTool(config?: { fileBase?: string }): Tool {
     permission: 'owner',
     confirmRequired: true,
 
+    buildConfirmRequest(args: Record<string, unknown>): Partial<ToolConfirmRequest> {
+      const pathArg = typeof args.path === 'string' ? args.path.trim() : '';
+      const content = typeof args.content === 'string' ? args.content : '';
+      const overwrite = Boolean(args.overwrite);
+      const basePath = getFileBasePath(config);
+      const trimmed = pathArg.replace(/^\/+/, '');
+      const fullPath = resolve(basePath, trimmed || '.');
+      return {
+        message: overwrite ? '该操作将覆盖或创建本地文件，请确认是否继续。' : '该操作将创建本地文件，请确认是否继续。',
+        grantKey: getDirectoryGrantKey('write_file', fullPath),
+        scopeOptions: ['once', 'session'],
+        defaultScope: 'once',
+        preview: {
+          title: overwrite ? '写入或覆盖文件' : '写入文件',
+          summary: `将向 ${pathArg || '未指定路径'} 写入 ${content.length} 个字符。`,
+          riskLevel: 'high',
+          targets: [pathArg || '未指定路径'],
+        },
+      };
+    },
+
     async precheck(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult | null> {
       const pathArg = args.path as string;
       const overwrite = Boolean(args.overwrite);
       const userMessage = (context.userMessage || '').toLowerCase();
-      const explicitOverwrite = /覆盖|重写|替换|改写|覆盖掉|覆盖它|覆盖该/.test(userMessage);
-      const allowOverwrite = overwrite && (explicitOverwrite || !context.userMessage);
+      const allowOverwrite = overwrite;
 
       if (!pathArg || typeof pathArg !== 'string') return null;
-      const writeIntent = /创建|新建|写入|新写|保存|生成文件|写文件|导出|保存为/.test(userMessage) || explicitOverwrite;
+      const writeIntent = /创建|新建|写入|新写|保存|生成文件|写文件|导出|保存为|更新|修改|编辑|改一下|补充|完善/.test(userMessage) || allowOverwrite;
       if (context.userMessage && !writeIntent) {
         return {
           success: false,
@@ -348,7 +399,7 @@ export function createWriteFileTool(config?: { fileBase?: string }): Tool {
         if (!allowOverwrite) {
           return {
             success: false,
-            content: `文件已存在：${pathArg}。如需覆盖，请明确说明“覆盖/重写”，我会再写入。`,
+            content: `文件已存在：${pathArg}。如需覆盖，请让助手以 overwrite=true 重试，并在确认弹窗中批准覆盖。`,
           };
         }
       } catch (err) {
@@ -366,14 +417,10 @@ export function createWriteFileTool(config?: { fileBase?: string }): Tool {
       const content = args.content as string;
       const overwrite = Boolean(args.overwrite);
       const userMessage = (context.userMessage || '').toLowerCase();
-      const explicitOverwrite = /覆盖|重写|替换|改写|覆盖掉|覆盖它|覆盖该/.test(userMessage);
-      const allowOverwrite = overwrite && (explicitOverwrite || !context.userMessage);
-      const writeIntent = /创建|新建|写入|新写|保存|生成文件|写文件|导出|保存为/.test(userMessage) || explicitOverwrite;
+      const allowOverwrite = overwrite;
+      const writeIntent = /创建|新建|写入|新写|保存|生成文件|写文件|导出|保存为|更新|修改|编辑|改一下|补充|完善/.test(userMessage) || allowOverwrite;
       if (context.userMessage && !writeIntent) {
-        return {
-          success: false,
-          content: '当前请求未包含写文件意图，已阻止 write_file。',
-        };
+        return { success: false, content: '当前请求未包含写文件意图，已阻止 write_file。' };
       }
 
       if (!pathArg || typeof pathArg !== 'string') {
@@ -385,7 +432,6 @@ export function createWriteFileTool(config?: { fileBase?: string }): Tool {
 
       const basePath = getFileBasePath(config);
       const baseDisplay = basePath.startsWith(homedir()) ? '~' + basePath.slice(homedir().length) : basePath;
-
       const trimmed = pathArg.trim().replace(/^\/+/, '');
       if (!isPathSafe(basePath, trimmed)) {
         return { success: false, content: `路径不安全，仅允许写入 ${baseDisplay} 下的文件` };
@@ -406,7 +452,7 @@ export function createWriteFileTool(config?: { fileBase?: string }): Tool {
           if (!allowOverwrite) {
             return {
               success: false,
-              content: `文件已存在：${pathArg}。如需覆盖，请明确说明“覆盖/重写”，我会再写入。`,
+              content: `文件已存在：${pathArg}。如需覆盖，请让助手以 overwrite=true 重试，并在确认弹窗中批准覆盖。`,
             };
           }
         } catch (err) {
@@ -414,8 +460,7 @@ export function createWriteFileTool(config?: { fileBase?: string }): Tool {
           if (!msg.includes('ENOENT')) throw err;
         }
 
-        const dir = dirname(fullPath);
-        mkdirSync(dir, { recursive: true });
+        mkdirSync(dirname(fullPath), { recursive: true });
         await writeFile(fullPath, String(content), { encoding: 'utf-8' });
         return {
           success: true,
@@ -423,9 +468,7 @@ export function createWriteFileTool(config?: { fileBase?: string }): Tool {
         };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        if (msg.includes('EACCES')) {
-          return { success: false, content: `无写入权限：${pathArg}` };
-        }
+        if (msg.includes('EACCES')) return { success: false, content: `无写入权限：${pathArg}` };
         return { success: false, content: `写入失败：${msg}` };
       }
     },
@@ -433,6 +476,3 @@ export function createWriteFileTool(config?: { fileBase?: string }): Tool {
 }
 
 export const writeFileTool = createWriteFileTool();
-
-
-

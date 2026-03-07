@@ -19,6 +19,7 @@ function createMockTool(overrides: Partial<Tool> = {}): Tool {
     },
     permission: overrides.permission ?? 'public',
     confirmRequired: overrides.confirmRequired ?? false,
+    buildConfirmRequest: overrides.buildConfirmRequest,
     execute: overrides.execute ?? (async () => ({ success: true, content: 'mock result' })),
   };
 }
@@ -177,6 +178,26 @@ describe('search_web tool', () => {
     const ctx: ToolContext = { senderId: 'owner-1', isOwner: true, sessionId: 'sess-1' };
     const result = await searchWebTool.execute({}, ctx);
     expect(result.success).toBe(false);
+  });
+
+  it('requires permission support before searching the web', async () => {
+    const ctx: ToolContext = { senderId: 'owner-1', isOwner: true, sessionId: 'sess-1' };
+    const result = await searchWebTool.execute({ query: 'CrabCrush' }, ctx);
+    expect(result.success).toBe(false);
+    expect(result.content).toContain('权限确认');
+  });
+
+  it('stops when permission request is denied', async () => {
+    const ctx: ToolContext = {
+      senderId: 'owner-1',
+      isOwner: true,
+      sessionId: 'sess-1',
+      requestPermission: async () => false,
+      hasPermissionGrant: () => false,
+    };
+    const result = await searchWebTool.execute({ query: 'CrabCrush' }, ctx);
+    expect(result.success).toBe(false);
+    expect(result.content).toContain('用户拒绝执行工具 "search_web"');
   });
 
   it('is an owner tool', () => {
@@ -369,7 +390,7 @@ describe('write_file tool', () => {
 
       const second = await writeFileTool.execute(
         { path: 'workspace/exist.txt', content: 'second', overwrite: true },
-        { ...ctx, userMessage: '覆盖该文件' },
+        { ...ctx, userMessage: '请更新这个文件' },
       );
       expect(second.success).toBe(true);
       const read = await readFileTool.execute({ path: 'workspace/exist.txt' }, ctx);
@@ -408,3 +429,4 @@ describe('write_file tool', () => {
     expect(writeFileTool.confirmRequired).toBe(true);
   });
 });
+

@@ -12,7 +12,7 @@
 
 import { DWClient, TOPIC_ROBOT } from 'dingtalk-stream';
 import type { ChannelAdapter, ChatHandler } from './types.js';
-import type { ToolConfirmHandler } from '../tools/types.js';
+import type { ToolConfirmDecision, ToolConfirmHandler, ToolExecutionPreview } from '../tools/types.js';
 import { BlockStreamer } from './block_streaming.js';
 
 export interface DingTalkConfig {
@@ -24,20 +24,30 @@ export interface DingTalkConfig {
 const DINGTALK_TEXT_MAX = 2000;
 const DINGTALK_MARKDOWN_MAX = 4000;
 
+export function parseDingTalkConfirmReply(content: string): {
+  action: '允许' | '拒绝';
+  scope: 'once' | 'session';
+  id?: string;
+} | null {
+  const trimmed = content.trim();
+  const match = trimmed.match(/^(允许|拒绝)(?:\s+(本会话))?(?:\s+([\w-]+))?$/);
+  if (!match) return null;
+  return {
+    action: match[1] as '允许' | '拒绝',
+    scope: match[2] ? 'session' : 'once',
+    id: match[3],
+  };
+}
+
 function formatArgsSummary(args: Record<string, unknown>, maxLen = 500): string {
   const lines: string[] = [];
   const path = typeof args.path === 'string' ? args.path : '';
   const content = typeof args.content === 'string' ? args.content : '';
 
-  if (path) {
-    lines.push(`文件：${path}`);
-  }
-
+  if (path) lines.push(`文件：${path}`);
   if (content) {
     let preview = content;
-    if (preview.length > maxLen) {
-      preview = preview.slice(0, maxLen) + '\n...（已截断）';
-    }
+    if (preview.length > maxLen) preview = preview.slice(0, maxLen) + '\n...（已截断）';
     lines.push('内容预览：');
     lines.push(preview);
   }
@@ -50,16 +60,27 @@ function formatArgsSummary(args: Record<string, unknown>, maxLen = 500): string 
   } catch {
     text = '[无法序列化参数]';
   }
-  if (text.length > maxLen) {
-    return text.slice(0, maxLen) + '\n...（已截断）';
-  }
+  if (text.length > maxLen) return text.slice(0, maxLen) + '\n...（已截断）';
   return text;
 }
 
+function formatPreview(preview?: ToolExecutionPreview): string {
+  if (!preview) return '';
+  const parts: string[] = [];
+  if (preview.title) parts.push(`操作：${preview.title}`);
+  if (preview.summary) parts.push(`摘要：${preview.summary}`);
+  if (preview.riskLevel) parts.push(`风险：${preview.riskLevel}`);
+  if (preview.targets && preview.targets.length > 0) {
+    parts.push('目标：');
+    for (const target of preview.targets) parts.push(`- ${target}`);
+  }
+  return parts.join('\n');
+}
+
 function findPendingConfirmForSender(
-  pending: Map<string, { senderId: string; resolve: (allow: boolean) => void; timeout: NodeJS.Timeout; name: string }>,
+  pending: Map<string, { senderId: string; resolve: (decision: ToolConfirmDecision) => void; timeout: NodeJS.Timeout; name: string }>,
   senderId: string,
-): { id: string; item: { senderId: string; resolve: (allow: boolean) => void; timeout: NodeJS.Timeout; name: string } } | null {
+): { id: string; item: { senderId: string; resolve: (decision: ToolConfirmDecision) => void; timeout: NodeJS.Timeout; name: string } } | null {
   for (const [id, item] of pending.entries()) {
     if (item.senderId === senderId) return { id, item };
   }
@@ -81,15 +102,10 @@ export class DingTalkAdapter implements ChannelAdapter {
   readonly type = 'dingtalk';
   private client: DWClient;
   private chatHandler: ChatHandler | null = null;
-  private config: DingTalkConfig;
-  private pendingConfirms = new Map<string, { senderId: string; resolve: (allow: boolean) => void; timeout: NodeJS.Timeout; name: string }>();
+  private pendingConfirms = new Map<string, { senderId: string; resolve: (decision: ToolConfirmDecision) => void; timeout: NodeJS.Timeout; name: string }>();
 
-  constructor(config: DingTalkConfig) {
-    this.config = config;
-    this.client = new DWClient({
-      clientId: config.clientId,
-      clientSecret: config.clientSecret,
-    });
+  constructor(private config: DingTalkConfig) {
+    this.client = new DWClient({ clientId: config.clientId, clientSecret: config.clientSecret });
   }
 
   setChatHandler(handler: ChatHandler): void {
@@ -138,17 +154,15 @@ export class DingTalkAdapter implements ChannelAdapter {
     try {
       const payload = JSON.parse(res.data) as RobotMessage;
       const content = payload.text?.content?.trim();
-
       if (!content) {
         this.ack(res);
         return;
       }
 
       // 处理确认回复：允许 <id> / 拒绝 <id> 或 仅回复 允许/拒绝
-      const confirmMatch = content.match(/^(允许|拒绝)(?:\s+([\w-]+))?$/);
-      if (confirmMatch) {
-        const action = confirmMatch[1];
-        const id = confirmMatch[2];
+      const confirmReply = parseDingTalkConfirmReply(content);
+      if (confirmReply) {
+        const { action, scope, id } = confirmReply;
         const pendingFound = findPendingConfirmForSender(this.pendingConfirms, payload.senderStaffId);
         const pending = id ? this.pendingConfirms.get(id) : pendingFound?.item;
         const pendingId = id ?? pendingFound?.id;
@@ -157,8 +171,11 @@ export class DingTalkAdapter implements ChannelAdapter {
           clearTimeout(pending.timeout);
           this.pendingConfirms.delete(pendingId);
           const allow = action === '允许';
-          pending.resolve(allow);
-          await this.sendReply(payload, allow ? `已允许执行工具：${pending.name}` : `已拒绝执行工具：${pending.name}`);
+          const decision: ToolConfirmDecision = { allow, scope };
+          pending.resolve(decision);
+          await this.sendReply(payload, allow
+            ? `已允许执行工具：${pending.name}${decision.scope === 'session' ? '（本会话）' : '（仅本次）'}`
+            : `已拒绝执行工具：${pending.name}`);
         } else {
           await this.sendReply(payload, '未找到对应的确认请求或已过期。');
         }
@@ -170,7 +187,7 @@ export class DingTalkAdapter implements ChannelAdapter {
       if (pendingForSender) {
         await this.sendReply(
           payload,
-          `你有待确认的操作：${pendingForSender.item.name}。请回复：允许 ${pendingForSender.id}  或  拒绝 ${pendingForSender.id}`,
+          `你有待确认的操作：${pendingForSender.item.name}。请回复：允许 ${pendingForSender.id} / 允许 本会话 ${pendingForSender.id} / 拒绝 ${pendingForSender.id}`,
         );
         this.ack(res);
         return;
@@ -178,10 +195,7 @@ export class DingTalkAdapter implements ChannelAdapter {
 
       // 按发送者 ID 隔离会话（DEC-011）
       const sessionId = `dingtalk-${payload.senderStaffId}`;
-
-      console.log(
-        `[钉钉] ${payload.senderNick}(${payload.senderStaffId}): ${content.length > 50 ? content.slice(0, 50) + '...' : content}`,
-      );
+      console.log(`[钉钉] ${payload.senderNick}(${payload.senderStaffId}): ${content.length > 50 ? content.slice(0, 50) + '...' : content}`);
 
       // 钉钉不支持 token 级流式：用 Block Streaming 分片发送，提升体感（DEC-031）
       let streamedAny = false;
@@ -209,30 +223,28 @@ export class DingTalkAdapter implements ChannelAdapter {
       // 传入 senderStaffId 用于 Owner 权限判断（DEC-026）
       const toolNames: string[] = [];
       const toolResults: string[] = [];
-      const requestConfirm: ToolConfirmHandler = async ({ name, args, message }) => {
+      const requestConfirm: ToolConfirmHandler = async ({ name, args, message, preview, defaultScope }) => {
         const id = `confirm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         const timeoutMs = 60_000;
-        const summary = formatArgsSummary(args);
-        const detailLines: string[] = [];
-        if (message) detailLines.push(`说明：${message}`);
-        if (summary) detailLines.push(summary);
-        const details = detailLines.length > 0 ? detailLines.join('\n') : '（无更多细节）';
+        const sections = [formatPreview(preview), message ? `说明：${message}` : '', formatArgsSummary(args)].filter(Boolean);
         const prompt = [
           `⚠️ 需要确认：${name}`,
           '',
-          details,
+          ...sections,
           '',
-          `回复：允许 ${id}  或  拒绝 ${id}`,
-          `（${Math.floor(timeoutMs / 1000)} 秒内有效）`,
+          `回复：允许 ${id}`,
+          `或：允许 本会话 ${id}`,
+          `或：拒绝 ${id}`,
+          `（默认作用域：${defaultScope === 'session' ? '本会话' : '仅本次'}，${Math.floor(timeoutMs / 1000)} 秒内有效）`,
         ].join('\n');
 
         await this.sendReply(payload, prompt);
 
-        return await new Promise<boolean>((resolve) => {
+        return await new Promise<ToolConfirmDecision>((resolve) => {
           const timeout = setTimeout(() => {
             this.pendingConfirms.delete(id);
             void this.sendReply(payload, `确认超时，已拒绝执行工具：${name}`);
-            resolve(false);
+            resolve({ allow: false, scope: defaultScope ?? 'once' });
           }, timeoutMs);
 
           this.pendingConfirms.set(id, { senderId: payload.senderStaffId, resolve, timeout, name });
@@ -241,9 +253,7 @@ export class DingTalkAdapter implements ChannelAdapter {
 
       try {
         for await (const event of this.chatHandler(sessionId, content, undefined, payload.senderStaffId, requestConfirm)) {
-          if ('type' in event && (event as { type: string }).type === 'stream_control') {
-            continue;
-          }
+          if ('type' in event && (event as { type: string }).type === 'stream_control') continue;
           if ('type' in event && (event as { type: string }).type === 'tool_call') {
             const tc = event as { name: string; result?: string; success?: boolean };
             if (!toolNames.includes(tc.name)) toolNames.push(tc.name);
@@ -275,21 +285,14 @@ export class DingTalkAdapter implements ChannelAdapter {
       }
 
       if (!streamedAny) {
-        if (toolResults.length > 0) {
-          await this.sendReply(payload, toolResults.join('\n'));
-        } else {
-          await this.sendReply(payload, '抱歉，我没有生成有效的回复。');
-        }
+        if (toolResults.length > 0) await this.sendReply(payload, toolResults.join('\n'));
+        else await this.sendReply(payload, '抱歉，我没有生成有效的回复。');
       }
 
       if (toolResults.length > 0) {
-        const header = toolNames.length > 0
-          ? `🔧 已调用：${toolNames.join('、')}`
-          : '🔧 工具结果摘要：';
-        const summary = `${header}\n\n${toolResults.join('\n')}`;
-        await this.sendReply(payload, summary);
+        const header = toolNames.length > 0 ? `🔧 已调用：${toolNames.join('、')}` : '🔧 工具结果摘要：';
+        await this.sendReply(payload, `${header}\n\n${toolResults.join('\n')}`);
       }
-      // 确认消息已处理（避免钉钉重复推送）
       this.ack(res);
     } catch (err) {
       console.error('[钉钉] 消息处理失败:', err);
@@ -302,19 +305,11 @@ export class DingTalkAdapter implements ChannelAdapter {
    * 短消息用 text 格式，长消息用 markdown 格式
    * 按钉钉 API 限制截断，避免超长导致发送失败
    */
-  private async sendReply(
-    payload: RobotMessage,
-    content: string,
-  ): Promise<void> {
+  private async sendReply(payload: RobotMessage, content: string): Promise<void> {
     const accessToken = await this.client.getAccessToken();
 
     // 超过 200 字或包含代码块/标题等 Markdown 特征时，用 Markdown 格式
-    const useMarkdown =
-      content.length > 200 ||
-      content.includes('```') ||
-      content.includes('# ') ||
-      content.includes('**');
-
+    const useMarkdown = content.length > 200 || content.includes('```') || content.includes('# ') || content.includes('**');
     const maxLen = useMarkdown ? DINGTALK_MARKDOWN_MAX : DINGTALK_TEXT_MAX;
     let text = content;
     if (text.length > maxLen) {
@@ -325,30 +320,15 @@ export class DingTalkAdapter implements ChannelAdapter {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let body: Record<string, any>;
-
     if (useMarkdown) {
-      body = {
-        msgtype: 'markdown',
-        markdown: {
-          title: 'CrabCrush',
-          text,
-        },
-      };
+      body = { msgtype: 'markdown', markdown: { title: 'CrabCrush', text } };
     } else {
-      body = {
-        msgtype: 'text',
-        text: {
-          content: text,
-        },
-      };
+      body = { msgtype: 'text', text: { content: text } };
     }
 
     // 群聊时 @发送者
     if (payload.conversationType === '2') {
-      body.at = {
-        atUserIds: [payload.senderStaffId],
-        isAtAll: false,
-      };
+      body.at = { atUserIds: [payload.senderStaffId], isAtAll: false };
     }
 
     const response = await fetch(payload.sessionWebhook, {
@@ -378,8 +358,4 @@ export class DingTalkAdapter implements ChannelAdapter {
     }
   }
 }
-
-
-
-
 

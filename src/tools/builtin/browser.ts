@@ -12,12 +12,17 @@ import { chromium } from 'playwright';
 import type { Tool, ToolContext, ToolResult } from '../types.js';
 
 const PAGE_LOAD_TIMEOUT_MS = 15_000;
-const DEFAULT_MAX_CHARS = 8000; // 避免返回过多内容给模型
+const DEFAULT_MAX_CHARS = 8000;
 
 function isLoopbackHost(hostname: string): boolean {
   const h = hostname.toLowerCase();
   return h === 'localhost' || h === '127.0.0.1' || h === '::1';
 }
+
+function getBrowseGrantKey(url: URL): string {
+  return `web:${url.hostname.toLowerCase()}`;
+}
+
 export const browseUrlTool: Tool = {
   definition: {
     name: 'browse_url',
@@ -41,7 +46,7 @@ export const browseUrlTool: Tool = {
   permission: 'owner',
   confirmRequired: false,
 
-  async execute(args: Record<string, unknown>, _context: ToolContext): Promise<ToolResult> {
+  async execute(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {
     const url = args.url as string;
     const maxChars = (args.maxChars as number) || DEFAULT_MAX_CHARS;
 
@@ -55,19 +60,34 @@ export const browseUrlTool: Tool = {
 
     // 请求级权限确认：外部 URL 需要用户明确授权（见 docs/DESIGN/permissions.md）
     try {
-      const u = new URL(url);
-      const context = _context;
-      if (!isLoopbackHost(u.hostname) && context.requestPermission) {
-        const allowed = await context.requestPermission({
-          action: 'browse_url',
-          message: `是否允许访问该 URL？\n${url}`,
-          params: { url },
-        });
-        if (!allowed) return { success: false, content: '用户拒绝执行工具 "browse_url"' };
+      const parsed = new URL(url);
+      if (!isLoopbackHost(parsed.hostname)) {
+        const grantKey = getBrowseGrantKey(parsed);
+        if (!context.hasPermissionGrant?.(grantKey)) {
+          if (!context.requestPermission) {
+            return { success: false, content: '访问外部网页需要通道支持权限确认。' };
+          }
+          const allowed = await context.requestPermission({
+            action: 'browse_url',
+            message: `是否允许访问该 URL？\n${url}`,
+            params: { url },
+            grantKey,
+            scopeOptions: ['once', 'session'],
+            defaultScope: 'once',
+            preview: {
+              title: '访问外部网页',
+              summary: `将启动浏览器并访问域名 ${parsed.hostname}。`,
+              riskLevel: 'medium',
+              targets: [parsed.hostname, url],
+            },
+          });
+          if (!allowed) return { success: false, content: '用户拒绝执行工具 "browse_url"' };
+        }
       }
     } catch {
       // URL 已在上方做了协议检查，这里解析失败就忽略（后续 page.goto 会报错并返回原因）
     }
+
     let browser;
     try {
       browser = await chromium.launch({ headless: true });
@@ -90,17 +110,15 @@ export const browseUrlTool: Tool = {
       });
 
       // 清理空白字符，截断
-      const cleaned = bodyText
-        .replace(/\s+/g, ' ')
-        .trim();
-
+      const cleaned = bodyText.replace(/\s+/g, ' ').trim();
       const truncated = cleaned.length > maxChars
         ? cleaned.slice(0, maxChars) + `\n\n...（已截断，原文共 ${cleaned.length} 字符）`
         : cleaned;
 
-      const summary = `【标题】${title}\n\n【正文】\n${truncated || '（无正文内容）'}`;
-
-      return { success: true, content: summary };
+      return {
+        success: true,
+        content: `【标题】${title}\n\n【正文】\n${truncated || '（无正文内容）'}`,
+      };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes('Timeout') || msg.includes('timeout')) {
@@ -121,5 +139,3 @@ export const browseUrlTool: Tool = {
     }
   },
 };
-
-

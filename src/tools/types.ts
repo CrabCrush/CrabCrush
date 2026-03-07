@@ -38,6 +38,17 @@ export interface ToolDefinition {
  */
 export type ToolPermission = 'public' | 'owner';
 
+/** 确认作用域 */
+export type ConfirmationScope = 'once' | 'session';
+
+/** 执行预览 */
+export interface ToolExecutionPreview {
+  title: string;
+  summary?: string;
+  riskLevel?: 'low' | 'medium' | 'high';
+  targets?: string[];
+}
+
 /** 工具确认请求 */
 export interface ToolConfirmRequest {
   name: string;
@@ -45,19 +56,37 @@ export interface ToolConfirmRequest {
   sessionId: string;
   senderId: string;
   /** confirmRequired(工具级) 或 permission_request(请求级) */
-  kind?: 'confirm' | 'permission_request';
+  kind?: 'confirm' | 'permission_request' | 'plan';
   /** 可选说明文案 */
   message?: string;
+  /** 执行预览 */
+  preview?: ToolExecutionPreview;
+  /** 授权作用域选项 */
+  scopeOptions?: ConfirmationScope[];
+  /** 默认作用域 */
+  defaultScope?: ConfirmationScope;
+  /** 会话授权复用键 */
+  grantKey?: string;
+}
+
+/** 工具确认结果 */
+export interface ToolConfirmDecision {
+  allow: boolean;
+  scope?: ConfirmationScope;
 }
 
 /** 工具确认处理器 */
-export type ToolConfirmHandler = (request: ToolConfirmRequest) => Promise<boolean>;
+export type ToolConfirmHandler = (request: ToolConfirmRequest) => Promise<ToolConfirmDecision>;
 
 /** 运行时权限请求（请求级） */
 export interface PermissionRequest {
   action: string;
   message: string;
   params?: Record<string, unknown>;
+  preview?: ToolExecutionPreview;
+  scopeOptions?: ConfirmationScope[];
+  defaultScope?: ConfirmationScope;
+  grantKey?: string;
 }
 
 /**
@@ -76,6 +105,10 @@ export interface ToolContext {
   confirm?: ToolConfirmHandler;
   /** 运行时权限请求（动态） */
   requestPermission?: (request: PermissionRequest) => Promise<boolean>;
+  /** 检查是否已有会话级授权 */
+  hasPermissionGrant?: (grantKey: string) => boolean;
+  /** 记录会话级授权 */
+  rememberPermissionGrant?: (grantKey: string, scope: ConfirmationScope) => void;
   /** 审计日志回调（可选） */
   audit?: (event: { type: string; [key: string]: unknown }) => void;
 }
@@ -99,14 +132,11 @@ export interface Tool {
   permission: ToolPermission;
   /** 是否需要用户确认才执行（高危操作，详见 DEC-026） */
   confirmRequired: boolean;
+  /** 构建确认请求（用于执行预览、会话授权作用域） */
+  buildConfirmRequest?(args: Record<string, unknown>, context: ToolContext): Partial<ToolConfirmRequest>;
   /** 执行前预检：返回 ToolResult 则直接返回，不再确认/执行 */
   precheck?(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult | null>;
   /** 执行工具 */
   execute(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult>;
 }
-
-
-
-
-
 

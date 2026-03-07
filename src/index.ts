@@ -111,7 +111,7 @@ program
         clientSecret: dt.clientSecret,
       });
       dingtalk.setChatHandler((sessionId, content, signal, senderId, confirmToolCall) =>
-        agent.chat(sessionId, content, signal, senderId, confirmToolCall),
+        agent.chat(sessionId, content, signal, senderId, confirmToolCall, 'dingtalk'),
       );
       channels.push(dingtalk);
     }

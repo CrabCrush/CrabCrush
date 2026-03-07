@@ -299,18 +299,25 @@
       margin-bottom: 0.5rem;
     }
 
-    /* Tool call display */
-    .tool-call {
+        /* Tool call display */
+    .tool-plan, .tool-call {
       margin: 0.5rem 1rem;
       padding: 0.6rem 0.8rem;
-      background: rgba(99, 102, 241, 0.1);
-      border-left: 3px solid #6366f1;
       border-radius: 0 6px 6px 0;
       font-size: 0.8rem;
       color: var(--text-muted);
     }
+    .tool-plan {
+      background: rgba(16, 185, 129, 0.08);
+      border-left: 3px solid #10b981;
+    }
+    .tool-call {
+      background: rgba(99, 102, 241, 0.1);
+      border-left: 3px solid #6366f1;
+    }
     .tool-header { color: var(--text); margin-bottom: 0.3rem; }
     .tool-header strong { color: #818cf8; }
+    .tool-plan .tool-header strong { color: #34d399; }
     .tool-args { margin-bottom: 0.2rem; }
     .tool-args code { background: rgba(255,255,255,0.06); padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.85em; }
     .tool-result { color: #a5b4fc; }
@@ -479,10 +486,22 @@
     <div class="confirm-modal">
       <div class="confirm-title" id="confirm-title">需要确认</div>
       <div class="confirm-desc" id="confirm-desc">该操作可能会修改本地数据，请确认是否继续。</div>
+      <div id="confirm-preview" style="display:none;margin-bottom:0.6rem;padding:0.6rem 0.7rem;background:rgba(233,69,96,0.08);border:1px solid var(--border);border-radius:8px">
+        <div id="confirm-preview-title" style="font-size:0.9rem;font-weight:600;margin-bottom:0.35rem"></div>
+        <div id="confirm-preview-summary" style="font-size:0.82rem;color:var(--text-muted);line-height:1.6"></div>
+        <div id="confirm-preview-risk" style="font-size:0.78rem;margin-top:0.35rem"></div>
+        <div id="confirm-preview-targets" style="font-size:0.8rem;margin-top:0.45rem;white-space:pre-wrap"></div>
+      </div>
       <div class="confirm-args" id="confirm-args"></div>
+      <div id="confirm-scope" style="display:none;margin-top:0.8rem">
+        <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:0.45rem">授权范围</div>
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
+          <button id="confirm-allow-once" class="action-btn" style="background:var(--primary)">仅本次允许</button>
+          <button id="confirm-allow-session" class="action-btn" style="background:#2563eb">本会话允许</button>
+        </div>
+      </div>
       <div class="confirm-actions">
         <button id="confirm-deny" class="action-btn" style="background:#3f3f46">拒绝</button>
-        <button id="confirm-allow" class="action-btn" style="background:var(--primary)">允许</button>
       </div>
     </div>
   </div>
@@ -528,6 +547,8 @@
     }
 
     const TOOL_PREFIX = '__TOOL_CALL__\n';
+    const TOOL_PLAN_PREFIX = '__TOOL_PLAN__\n';
+    const TOOL_PLAN_RESULT_PREFIX = '__TOOL_PLAN_RESULT__\n';
     function renderMessagesToFragment(messages) {
       const fragment = document.createDocumentFragment();
       for (const m of messages) {
@@ -537,20 +558,42 @@
             el.className = `message ${m.role}`;
             el.textContent = m.content || '';
             fragment.appendChild(el);
-          } else if (m.role === 'assistant' && m.content) {
-            if (m.content.startsWith(TOOL_PREFIX)) {
+                    } else if (m.role === 'assistant' && m.content) {
+            if (m.content.startsWith(TOOL_PREFIX) || m.content.startsWith(TOOL_PLAN_PREFIX) || m.content.startsWith(TOOL_PLAN_RESULT_PREFIX)) {
               let s = m.content;
-              while (s.startsWith(TOOL_PREFIX)) {
+              while (s.startsWith(TOOL_PREFIX) || s.startsWith(TOOL_PLAN_PREFIX) || s.startsWith(TOOL_PLAN_RESULT_PREFIX)) {
                 const endIdx = s.indexOf('\n__END__');
                 if (endIdx < 0) break;
                 try {
-                  const t = JSON.parse(s.slice(TOOL_PREFIX.length, endIdx));
-                  const toolEl = document.createElement('div');
-                  toolEl.className = 'tool-call';
-                  const icon = t.success ? '✅' : '❌';
-                  const safeResult = escapeHtml(String(t.result || ''));
-                  toolEl.innerHTML = `<div class="tool-header">${icon} 调用工具: <strong>${escapeHtml(t.name || '')}</strong></div><div class="tool-args">参数: <code>${escapeHtml(JSON.stringify(t.args || {}))}</code></div><div class="tool-result" style="white-space:pre-wrap">结果: ${safeResult}</div>`;
-                  fragment.appendChild(toolEl);
+                  if (s.startsWith(TOOL_PREFIX)) {
+                    const t = JSON.parse(s.slice(TOOL_PREFIX.length, endIdx));
+                    const toolEl = document.createElement('div');
+                    toolEl.className = 'tool-call';
+                    const icon = t.success ? '✅' : '❌';
+                    const safeResult = escapeHtml(String(t.result || ''));
+                    toolEl.innerHTML = `<div class="tool-header">${icon} 调用工具: <strong>${escapeHtml(t.name || '')}</strong></div><div class="tool-args">参数: <code>${escapeHtml(JSON.stringify(t.args || {}))}</code></div><div class="tool-result" style="white-space:pre-wrap">结果: ${safeResult}</div>`;
+                    fragment.appendChild(toolEl);
+                  } else if (s.startsWith(TOOL_PLAN_PREFIX)) {
+                    const t = JSON.parse(s.slice(TOOL_PLAN_PREFIX.length, endIdx));
+                    const planEl = document.createElement('div');
+                    planEl.className = 'tool-plan';
+                    const steps = Array.isArray(t.steps) ? t.steps : [];
+                    const items = steps.map((step, idx) => {
+                      const title = escapeHtml(step.preview?.title || step.name || '未命名步骤');
+                      const summary = step.preview?.summary ? `<div style="margin-top:0.2rem;color:var(--text-muted)">${escapeHtml(step.preview.summary)}</div>` : '';
+                      return `<div style="margin-top:0.45rem"><strong>${idx + 1}. ${title}</strong>${summary}</div>`;
+                    }).join('');
+                    planEl.innerHTML = `<div class="tool-header">📝 <strong>${escapeHtml(t.summary || '执行计划')}</strong></div>${items}`;
+                    fragment.appendChild(planEl);
+                  } else if (s.startsWith(TOOL_PLAN_RESULT_PREFIX)) {
+                    const t = JSON.parse(s.slice(TOOL_PLAN_RESULT_PREFIX.length, endIdx));
+                    const resultEl = document.createElement('div');
+                    resultEl.className = 'tool-plan';
+                    const icon = t.allowed ? '✅' : '❌';
+                    const text = t.allowed ? '已批准执行计划' : '已拒绝执行计划';
+                    resultEl.innerHTML = `<div class="tool-header">${icon} <strong>${text}</strong></div><div style="margin-top:0.25rem;color:var(--text-muted)">第 ${Number(t.round || 0)} 轮计划</div>`;
+                    fragment.appendChild(resultEl);
+                  }
                 } catch (_) {}
                 s = s.slice(endIdx + 8).replace(/^\s+/, '');
               }
@@ -626,7 +669,14 @@
     const confirmTitle = document.getElementById('confirm-title');
     const confirmDesc = document.getElementById('confirm-desc');
     const confirmArgs = document.getElementById('confirm-args');
-    const confirmAllowBtn = document.getElementById('confirm-allow');
+    const confirmPreview = document.getElementById('confirm-preview');
+    const confirmPreviewTitle = document.getElementById('confirm-preview-title');
+    const confirmPreviewSummary = document.getElementById('confirm-preview-summary');
+    const confirmPreviewRisk = document.getElementById('confirm-preview-risk');
+    const confirmPreviewTargets = document.getElementById('confirm-preview-targets');
+    const confirmScope = document.getElementById('confirm-scope');
+    const confirmAllowOnceBtn = document.getElementById('confirm-allow-once');
+    const confirmAllowSessionBtn = document.getElementById('confirm-allow-session');
     const confirmDenyBtn = document.getElementById('confirm-deny');
 
     let ws;
@@ -649,19 +699,36 @@
       if (confirmTitle) confirmTitle.textContent = `需要确认：${activeConfirm.name || ''}`;
       const defaultDesc = activeConfirm.kind === 'permission_request'
         ? '该操作需要额外权限，请确认是否继续。'
-        : '该操作可能会修改本地数据，请确认是否继续。';
+        : activeConfirm.kind === 'plan'
+          ? '该计划批准后才会开始执行具体步骤。'
+          : '该操作可能会修改本地数据，请确认是否继续。';
       if (confirmDesc) confirmDesc.textContent = activeConfirm.message || defaultDesc;
       if (confirmArgs) confirmArgs.textContent = JSON.stringify(activeConfirm.args || {}, null, 2);
+      const preview = activeConfirm.preview;
+      if (confirmPreview && preview) {
+        confirmPreview.style.display = 'block';
+        if (confirmPreviewTitle) confirmPreviewTitle.textContent = preview.title || '';
+        if (confirmPreviewSummary) confirmPreviewSummary.textContent = preview.summary || '';
+        if (confirmPreviewRisk) confirmPreviewRisk.textContent = preview.riskLevel ? `风险等级：${preview.riskLevel}` : '';
+        if (confirmPreviewTargets) confirmPreviewTargets.textContent = Array.isArray(preview.targets) ? preview.targets.map(t => `- ${t}`).join('\n') : '';
+      } else if (confirmPreview) {
+        confirmPreview.style.display = 'none';
+      }
+      const scopeOptions = activeConfirm.scopeOptions || ['once'];
+      if (confirmScope) confirmScope.style.display = (scopeOptions.length > 1 || scopeOptions.includes('once')) ? 'block' : 'none';
+      if (confirmAllowOnceBtn) confirmAllowOnceBtn.style.display = scopeOptions.includes('once') ? 'inline-flex' : 'none';
+      if (confirmAllowSessionBtn) confirmAllowSessionBtn.style.display = scopeOptions.includes('session') ? 'inline-flex' : 'none';
       if (confirmOverlay) confirmOverlay.classList.add('visible');
     }
 
-    function resolveConfirm(allow) {
+    function resolveConfirm(allow, scope = 'once') {
       if (!activeConfirm) return;
       if (ws && ws.readyState === 1) {
         ws.send(JSON.stringify({
           type: 'confirm_result',
           id: activeConfirm.id,
           allow: Boolean(allow),
+          scope,
         }));
       }
       activeConfirm = null;
@@ -799,8 +866,23 @@
             messagesEl.appendChild(hint);
           }
         } else if (msg.type === 'confirm') {
-          confirmQueue.push({ id: msg.id, name: msg.name, args: msg.args, kind: msg.kind, message: msg.message });
+          confirmQueue.push({ id: msg.id, name: msg.name, args: msg.args, kind: msg.kind, message: msg.message, preview: msg.preview, scopeOptions: msg.scopeOptions, defaultScope: msg.defaultScope });
           showNextConfirm();
+
+                } else if (msg.type === 'tool_plan') {
+          const planEl = document.createElement('div');
+          planEl.className = 'tool-plan';
+          const steps = Array.isArray(msg.steps) ? msg.steps : [];
+          const items = steps.map((step, idx) => {
+            const title = escapeHtml(step.preview?.title || step.name || '未命名步骤');
+            const summary = step.preview?.summary
+              ? `<div style="margin-top:0.2rem;color:var(--text-muted)">${escapeHtml(step.preview.summary)}</div>`
+              : '';
+            return `<div style="margin-top:0.45rem"><strong>${idx + 1}. ${title}</strong>${summary}</div>`;
+          }).join('');
+          planEl.innerHTML = `<div class="tool-header">📝 <strong>${escapeHtml(msg.summary || '执行计划')}</strong></div>${items}`;
+          messagesEl.appendChild(planEl);
+          messagesEl.scrollTop = messagesEl.scrollHeight;
 
         } else if (msg.type === 'tool_call') {
           // 工具调用事件 — 在聊天区域显示调用过程
@@ -941,6 +1023,9 @@
       isStreaming = false;
       rawContent = '';
       currentBotMsg = null;
+      activeConfirm = null;
+      confirmQueue.length = 0;
+      if (confirmOverlay) confirmOverlay.classList.remove('visible');
       sendBtn.disabled = false;
       stopBtn.classList.add('inactive');
       inputEl.disabled = false;
@@ -966,8 +1051,9 @@
     // ── 事件绑定 ──
     sendBtn.addEventListener('click', send);
     stopBtn.addEventListener('click', stopGeneration);
-    if (confirmAllowBtn) confirmAllowBtn.addEventListener('click', () => resolveConfirm(true));
-    if (confirmDenyBtn) confirmDenyBtn.addEventListener('click', () => resolveConfirm(false));
+    if (confirmAllowOnceBtn) confirmAllowOnceBtn.addEventListener('click', () => resolveConfirm(true, 'once'));
+    if (confirmAllowSessionBtn) confirmAllowSessionBtn.addEventListener('click', () => resolveConfirm(true, 'session'));
+    if (confirmDenyBtn) confirmDenyBtn.addEventListener('click', () => resolveConfirm(false, 'once'));
     if (confirmOverlay) {
       confirmOverlay.addEventListener('click', (e) => {
         if (e.target === confirmOverlay) resolveConfirm(false);
@@ -1012,6 +1098,16 @@
   </script>
 </body>
 </html>
+
+
+
+
+
+
+
+
+
+
 
 
 

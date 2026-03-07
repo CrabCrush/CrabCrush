@@ -91,6 +91,15 @@ const BEHAVIOR_RULES = `
 【行为规则】一次最多问 1 个问题；用户拒绝 → 停止；优先解决问题。
 `;
 
+/** 文件工具事实约束 — 始终注入，防止模型口头编造本地操作结果 */
+const FILE_TOOL_RULES = `
+【工具事实约束】
+涉及本地文件、目录、网页、数据库等外部事实时，必须先使用工具再回答，不能猜。
+只有在 read_file/list_files/write_file 等工具返回成功后，才能声称“文件存在 / 已创建 / 已修改 / 已读取”。
+如果工具返回失败，必须如实说明失败原因，不能口头假设任务已经完成。
+当用户要求“如果没有就创建，有就读取/返回内容”时，必须先检查，再根据结果决定是否写入。
+`;
+
 /**
  * 组装完整 system prompt
  * @param basePrompt 配置中的 agent.systemPrompt
@@ -116,6 +125,8 @@ export function buildSystemPrompt(basePrompt: string, workspaceContent: Workspac
   } else {
     parts.push(BEHAVIOR_RULES);
   }
+
+  parts.push(FILE_TOOL_RULES);
 
   return parts.join('\n').trim();
 }

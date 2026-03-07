@@ -3,7 +3,19 @@
  * 管理所有已注册的工具，提供查找、权限过滤等功能
  */
 
-import type { Tool, ToolDefinition, ToolContext, ToolResult } from './types.js';
+import type {
+  ConfirmationScope,
+  Tool,
+  ToolConfirmRequest,
+  ToolContext,
+  ToolDefinition,
+  ToolResult,
+} from './types.js';
+
+function rememberGrant(context: ToolContext, grantKey: string | undefined, scope: ConfirmationScope | undefined): void {
+  if (!grantKey || !scope || scope !== 'session') return;
+  context.rememberPermissionGrant?.(grantKey, scope);
+}
 
 export class ToolRegistry {
   private tools = new Map<string, Tool>();
@@ -69,41 +81,60 @@ export class ToolRegistry {
     }
 
     if (tool.confirmRequired) {
-      if (!context.confirm) {
-        context.audit?.({
-          type: 'tool_confirm_missing',
-          name,
-          sessionId: context.sessionId,
-          senderId: context.senderId,
-          kind: 'confirm',
-        });
-        return { success: false, content: `工具 "${name}" 需要用户确认，当前通道不支持确认。` };
-      }
-
-      let allowed = false;
-      try {
-        allowed = await context.confirm({
-          name,
-          args,
-          sessionId: context.sessionId,
-          senderId: context.senderId,
-          kind: 'confirm',
-        });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return { success: false, content: `确认失败: ${message}` };
-      }
-
-      context.audit?.({
-        type: 'tool_confirm',
+      const confirmRequest: ToolConfirmRequest = {
         name,
+        args,
         sessionId: context.sessionId,
         senderId: context.senderId,
-        allowed,
-      });
+        kind: 'confirm',
+        scopeOptions: ['once', 'session'],
+        defaultScope: 'once',
+        ...tool.buildConfirmRequest?.(args, context),
+      };
 
-      if (!allowed) {
-        return { success: false, content: `用户拒绝执行工具 "${name}"` };
+      if (confirmRequest.grantKey && context.hasPermissionGrant?.(confirmRequest.grantKey)) {
+        context.audit?.({
+          type: 'tool_confirm_reused',
+          name,
+          sessionId: context.sessionId,
+          senderId: context.senderId,
+          grantKey: confirmRequest.grantKey,
+        });
+      } else {
+        if (!context.confirm) {
+          context.audit?.({
+            type: 'tool_confirm_missing',
+            name,
+            sessionId: context.sessionId,
+            senderId: context.senderId,
+            kind: 'confirm',
+          });
+          return { success: false, content: `工具 "${name}" 需要用户确认，当前通道不支持确认。` };
+        }
+
+        let decision;
+        try {
+          decision = await context.confirm(confirmRequest);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return { success: false, content: `确认失败: ${message}` };
+        }
+
+        context.audit?.({
+          type: 'tool_confirm',
+          name,
+          sessionId: context.sessionId,
+          senderId: context.senderId,
+          allowed: decision.allow,
+          scope: decision.scope,
+          grantKey: confirmRequest.grantKey,
+        });
+
+        if (!decision.allow) {
+          return { success: false, content: `用户拒绝执行工具 "${name}"` };
+        }
+
+        rememberGrant(context, confirmRequest.grantKey, decision.scope ?? confirmRequest.defaultScope);
       }
     }
 
@@ -129,6 +160,3 @@ export class ToolRegistry {
     return [...this.tools.keys()];
   }
 }
-
-
-

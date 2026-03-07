@@ -17,6 +17,7 @@ import type { Tool, ToolContext, ToolResult } from '../types.js';
 const GOOGLE_TIMEOUT_MS = 5_000; // 有代理时很快，无代理会超时
 const BING_BAIDU_TIMEOUT_MS = 12_000;
 const MAX_RESULTS = 10;
+const SEARCH_PERMISSION_GRANT_KEY = 'network:search_web';
 
 function encodeQuery(q: string): string {
   return encodeURIComponent(q.trim());
@@ -85,6 +86,16 @@ function getEngineOrder(): EngineId[] {
     return [env];
   }
   return ['google', 'bing', 'baidu'];
+}
+
+function getEngineTargets(order: EngineId[]): string[] {
+  const targets = new Set<string>();
+  for (const engineId of order) {
+    if (engineId === 'google') targets.add('www.google.com');
+    if (engineId === 'bing') targets.add('www.bing.com');
+    if (engineId === 'baidu') targets.add('www.baidu.com');
+  }
+  return [...targets];
 }
 
 type Page = Awaited<ReturnType<Awaited<ReturnType<typeof chromium.launch>>['newPage']>>;
@@ -161,7 +172,7 @@ export const searchWebTool: Tool = {
   permission: 'owner',
   confirmRequired: false,
 
-  async execute(args: Record<string, unknown>, _context: ToolContext): Promise<ToolResult> {
+  async execute(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {
     const query = args.query as string;
 
     if (!query || typeof query !== 'string' || !query.trim()) {
@@ -169,6 +180,27 @@ export const searchWebTool: Tool = {
     }
 
     const order = getEngineOrder();
+    if (!context.hasPermissionGrant?.(SEARCH_PERMISSION_GRANT_KEY)) {
+      if (!context.requestPermission) {
+        return { success: false, content: '联网搜索需要通道支持权限确认。' };
+      }
+      const allowed = await context.requestPermission({
+        action: 'search_web',
+        message: `是否允许联网搜索该关键词？\n${query}`,
+        params: { query },
+        grantKey: SEARCH_PERMISSION_GRANT_KEY,
+        scopeOptions: ['once', 'session'],
+        defaultScope: 'once',
+        preview: {
+          title: '联网搜索',
+          summary: '将启动浏览器访问搜索引擎并抓取结果页。',
+          riskLevel: 'medium',
+          targets: [...getEngineTargets(order), query],
+        },
+      });
+      if (!allowed) return { success: false, content: '用户拒绝执行工具 "search_web"' };
+    }
+
     let browser;
 
     try {

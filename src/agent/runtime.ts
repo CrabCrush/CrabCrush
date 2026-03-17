@@ -10,7 +10,7 @@
 
 import type { ChatMessage, ChatChunk, ChatOptions, ToolCall } from '../models/provider.js';
 import type { ModelRouter } from '../models/router.js';
-import type { ConversationStore } from '../storage/database.js';
+import type { ConversationStore, PermissionGrant } from '../storage/database.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type {
   ConfirmationScope,
@@ -18,8 +18,10 @@ import type {
   ToolConfirmHandler,
   ToolExecutionPreview,
   PermissionRequest,
+  ToolPlanPolicy,
 } from '../tools/types.js';
 import { looksLikeFileToolRequest } from '../tools/intent.js';
+import { getPrincipalKey, inferGrantResource } from '../permissions/utils.js';
 import {
   getWorkspacePath,
   ensureWorkspaceDir,
@@ -68,11 +70,15 @@ export interface ToolPlanStep {
   name: string;
   args: Record<string, unknown>;
   preview?: ToolExecutionPreview;
+  grantKey?: string;
+  grantCovered?: boolean;
+  planPolicy?: ToolPlanPolicy;
 }
 
 export interface ToolPlanEvent {
   type: 'tool_plan';
   round: number;
+  operationId?: string;
   summary: string;
   steps: ToolPlanStep[];
 }
@@ -93,6 +99,16 @@ const TOOL_PLAN_BLOCK_START = '__TOOL_PLAN__\n';
 const TOOL_PLAN_RESULT_BLOCK_START = '__TOOL_PLAN_RESULT__\n';
 const TOOL_BLOCK_END = '\n__END__';
 const FILE_TOOL_REQUIRED_MESSAGE = '当前请求涉及文件状态或文件读写，但模型本轮没有调用必要工具。我需要先通过工具确认后才能继续，请重试。';
+const ADVICE_ONLY_DEGRADE_PROMPT = `
+【降级执行模式】
+用户刚刚拒绝了执行计划或工具确认，或者确认已超时。
+你现在必须进入“只给方案、不动手”模式：
+- 明确说明这次没有实际执行
+- 不要再调用工具，也不要声称已经完成了文件/网页/系统操作
+- 如果已有部分工具结果，可以基于这些已知结果继续总结
+- 给出纯文本的替代方案、手动步骤或可复制内容
+- 保持语气自然、简洁、可执行
+`;
 
 function serializeToolBlock(t: { name: string; args: Record<string, unknown>; result: string; success: boolean }): string {
   return TOOL_BLOCK_START + JSON.stringify(t) + TOOL_BLOCK_END;
@@ -104,6 +120,10 @@ function serializeToolPlanBlock(t: { round: number; summary: string; steps: Tool
 
 function serializeToolPlanResultBlock(t: { round: number; allowed: boolean }): string {
   return TOOL_PLAN_RESULT_BLOCK_START + JSON.stringify(t) + TOOL_BLOCK_END;
+}
+
+function createOperationId(): string {
+  return `op-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 export function parseToolBlocks(content: string): Array<{ name: string; args: Record<string, unknown>; result: string; success: boolean }> | null {
@@ -127,6 +147,7 @@ export function parseToolBlocks(content: string): Array<{ name: string; args: Re
 export class AgentRuntime {
   private sessions = new Map<string, Session>();
   private sessionPermissionGrants = new Map<string, Set<string>>();
+  private sessionPrincipals = new Map<string, string>();
   private router: ModelRouter;
   private basePrompt: string;
   private maxTokens: number;
@@ -170,22 +191,100 @@ export class AgentRuntime {
     return grants;
   }
 
-  private hasPermissionGrant(sessionId: string, grantKey: string): boolean {
-    return this.getGrantSet(sessionId).has(grantKey);
+  private hasPermissionGrant(
+    sessionId: string,
+    principalKey: string,
+    grantKey: string,
+    options?: { touch?: boolean },
+  ): boolean {
+    const inMemory = this.getGrantSet(sessionId).has(grantKey);
+    const persisted = this.store?.hasActivePermissionGrant?.(principalKey, grantKey) ?? false;
+    if (persisted && options?.touch !== false) this.store?.touchPermissionGrant?.(principalKey, grantKey);
+    return inMemory || persisted;
   }
 
-  private rememberPermissionGrant(sessionId: string, grantKey: string, scope: ConfirmationScope): void {
-    if (scope !== 'session') return;
-    this.getGrantSet(sessionId).add(grantKey);
-    this.auditLogger?.({ type: 'permission_grant_saved', sessionId, grantKey, scope });
+  private rememberPermissionGrant(
+    sessionId: string,
+    principalKey: string,
+    grantKey: string,
+    scope: ConfirmationScope,
+    details?: {
+      action?: string;
+      preview?: ToolExecutionPreview;
+    },
+  ): void {
+    if (scope === 'session') {
+      this.getGrantSet(sessionId).add(grantKey);
+      this.auditLogger?.({ type: 'permission_grant_saved', conversationId: sessionId, principalKey, grantKey, scope });
+      return;
+    }
+
+    if (scope === 'persistent') {
+      // 永久授权不仅要落库，也要立刻写入当前会话内存态，
+      // 避免“刚点了永久允许，当前连接里下一次还要再问一遍”。
+      this.getGrantSet(sessionId).add(grantKey);
+      const resource = inferGrantResource(grantKey, details?.preview);
+      this.store?.savePermissionGrant?.({
+        principalKey,
+        grantKey,
+        scope: 'persistent',
+        resourceType: resource.resourceType,
+        resourceValue: resource.resourceValue,
+        meta: {
+          action: details?.action,
+          previewTitle: details?.preview?.title,
+          previewSummary: details?.preview?.summary,
+          targets: details?.preview?.targets,
+        },
+      });
+      this.auditLogger?.({
+        type: 'permission_grant_saved',
+        conversationId: sessionId,
+        principalKey,
+        grantKey,
+        scope,
+        resourceType: resource.resourceType,
+        resourceValue: resource.resourceValue,
+      });
+    }
   }
 
   private buildToolPlan(toolCalls: ToolCall[], argsList: Array<Record<string, unknown>>, toolContext: ToolContext): ToolPlanStep[] {
     return toolCalls.map((tc, index) => {
       const args = argsList[index] ?? {};
-      const preview = this.toolRegistry?.get(tc.function.name)?.buildConfirmRequest?.(args, toolContext).preview;
-      return { name: tc.function.name, args, preview };
+      const tool = this.toolRegistry?.get(tc.function.name);
+      const confirmRequest = tool?.buildConfirmRequest?.(args, toolContext);
+      const permissionRequest = confirmRequest ? null : tool?.buildPermissionRequest?.(args, toolContext);
+      const preview = confirmRequest?.preview ?? permissionRequest?.preview;
+      const grantKey = confirmRequest?.grantKey ?? permissionRequest?.grantKey;
+      // 计划阶段只判断“是否已被授权覆盖”，不应把它计作一次真实使用。
+      const grantCovered = grantKey ? Boolean(toolContext.hasPermissionGrant?.(grantKey, { touch: false })) : false;
+      return {
+        name: tc.function.name,
+        args,
+        preview,
+        grantKey,
+        grantCovered,
+        planPolicy: tool?.planPolicy ?? 'covered_only',
+      };
     });
+  }
+
+  private shouldAutoApprovePlanStep(step: ToolPlanStep): boolean {
+    if (step.grantKey && step.grantCovered) return true;
+    if (step.planPolicy === 'always') return true;
+    if (step.planPolicy === 'safe_auto') return !step.grantKey;
+    return false;
+  }
+
+  /**
+   * 计划审批默认会弹窗；只有当整份计划的每一步都满足以下条件之一时才跳过：
+   * - 已被既有授权覆盖
+   * - 属于显式标记为 safe_auto 的低风险只读操作
+   */
+  private shouldSkipPlanApproval(planSteps: ToolPlanStep[]): boolean {
+    if (planSteps.length === 0) return false;
+    return planSteps.every((step) => this.shouldAutoApprovePlanStep(step));
   }
 
   private buildPlanPreview(planSummary: string, planSteps: ToolPlanStep[]): ToolExecutionPreview {
@@ -202,6 +301,34 @@ export class AgentRuntime {
       riskLevel: highRiskCount > 0 ? 'high' : 'medium',
       targets,
     };
+  }
+
+  /**
+   * 用户拒绝执行后，自动降级成 advice-only 回复。
+   * 这一步故意不再给模型 tools，避免它继续请求执行类动作。
+   */
+  private async *streamAdviceOnlyReply(
+    session: Session,
+    sessionId: string,
+    systemPrompt: string,
+    reason: string,
+    signal?: AbortSignal,
+  ): AsyncIterable<ChatChunk> {
+    const recentMessages = session.messages.slice(-this.contextWindow);
+    const degradePrompt = `${systemPrompt}\n${ADVICE_ONLY_DEGRADE_PROMPT}\n【本轮未执行原因】${reason}`;
+    const messages: ChatMessage[] = [{ role: 'system', content: degradePrompt }, ...recentMessages];
+    const chatOptions: ChatOptions = { maxTokens: this.maxTokens, signal };
+    let fullContent = '';
+
+    for await (const chunk of this.router.chat(messages, chatOptions)) {
+      if (chunk.content) fullContent += chunk.content;
+      yield chunk;
+    }
+
+    if (fullContent) {
+      session.messages.push({ role: 'assistant', content: fullContent });
+      this.store?.saveMessage(sessionId, 'assistant', fullContent);
+    }
   }
 
   private shouldRequireFileTool(userMessage: string): boolean {
@@ -251,11 +378,23 @@ export class AgentRuntime {
     channel = 'webchat',
   ): AsyncIterable<ChatChunk | ToolCallEvent | ToolPlanEvent | StreamControlEvent> {
     const session = this.getOrCreateSession(sessionId, channel, senderId ?? '');
+    const principalKey = getPrincipalKey(channel, senderId ?? '');
+    this.sessionPrincipals.set(sessionId, principalKey);
+    const emitAudit = (event: { type: string; [key: string]: unknown }): void => {
+      this.auditLogger?.({
+        conversationId: sessionId,
+        sessionId,
+        channel,
+        senderId: senderId ?? sessionId,
+        principalKey,
+        ...event,
+      });
+    };
 
     // 记录用户消息
     session.messages.push({ role: 'user', content: userMessage });
     this.store?.saveMessage(sessionId, 'user', userMessage);
-    this.auditLogger?.({ type: 'chat_input', sessionId, senderId: senderId ?? sessionId, length: userMessage.length });
+    emitAudit({ type: 'chat_input', length: userMessage.length });
 
     // 解析 system prompt（含工作区注入）
     const systemPrompt = await this.resolveSystemPrompt();
@@ -363,10 +502,16 @@ export class AgentRuntime {
 
 
       // 逐个执行工具
+      const operationId = createOperationId();
       const requestPermission = confirmToolCall
         ? async (req: PermissionRequest) => {
-          if (req.grantKey && this.hasPermissionGrant(sessionId, req.grantKey)) {
-            this.auditLogger?.({ type: 'permission_request_reused', sessionId, senderId: senderId ?? sessionId, action: req.action, grantKey: req.grantKey });
+          if (req.grantKey && this.hasPermissionGrant(sessionId, principalKey, req.grantKey)) {
+            emitAudit({
+              type: 'permission_request_reused',
+              operationId,
+              action: req.action,
+              grantKey: req.grantKey,
+            });
             return true;
           }
 
@@ -375,6 +520,7 @@ export class AgentRuntime {
             args: req.params ?? {},
             sessionId,
             senderId: senderId ?? sessionId,
+            operationId,
             kind: 'permission_request',
             message: req.message,
             preview: req.preview,
@@ -383,10 +529,9 @@ export class AgentRuntime {
             grantKey: req.grantKey,
           });
 
-          this.auditLogger?.({
+          emitAudit({
             type: 'permission_request_result',
-            sessionId,
-            senderId: senderId ?? sessionId,
+            operationId,
             action: req.action,
             allowed: decision.allow,
             scope: decision.scope,
@@ -394,21 +539,35 @@ export class AgentRuntime {
           });
 
           if (decision.allow && req.grantKey) {
-            this.rememberPermissionGrant(sessionId, req.grantKey, decision.scope ?? req.defaultScope ?? 'once');
+            this.rememberPermissionGrant(
+              sessionId,
+              principalKey,
+              req.grantKey,
+              decision.scope ?? req.defaultScope ?? 'once',
+              { action: req.action, preview: req.preview },
+            );
           }
           return decision.allow;
         }
         : undefined;
 
       const toolContext: ToolContext = {
+        channel,
         senderId: senderId ?? sessionId,
+        principalKey,
         isOwner,
         sessionId,
+        operationId,
         confirm: confirmToolCall,
         requestPermission,
-        hasPermissionGrant: (grantKey: string) => this.hasPermissionGrant(sessionId, grantKey),
-        rememberPermissionGrant: (grantKey: string, scope: ConfirmationScope) => this.rememberPermissionGrant(sessionId, grantKey, scope),
-        audit: this.auditLogger,
+        hasPermissionGrant: (grantKey: string, options?: { touch?: boolean }) =>
+          this.hasPermissionGrant(sessionId, principalKey, grantKey, options),
+        rememberPermissionGrant: (
+          grantKey: string,
+          scope: ConfirmationScope,
+          details?: { action?: string; preview?: ToolExecutionPreview },
+        ) => this.rememberPermissionGrant(sessionId, principalKey, grantKey, scope, details),
+        audit: (event) => emitAudit({ operationId, ...event }),
         userMessage,
       };
 
@@ -423,15 +582,16 @@ export class AgentRuntime {
 
       const planSteps = this.buildToolPlan(toolCalls, parsedArgsList, toolContext);
       const planSummary = planSteps.length === 1 ? '准备执行 1 个步骤' : `准备执行 ${planSteps.length} 个步骤`;
-      this.auditLogger?.({ type: 'tool_plan', sessionId, senderId: senderId ?? sessionId, round: toolRound, steps: planSteps.map((s) => s.name) });
+      emitAudit({ type: 'tool_plan', operationId, round: toolRound, steps: planSteps.map((s) => s.name) });
       this.store?.saveMessage(
         sessionId,
         'assistant',
         serializeToolPlanBlock({ round: toolRound, summary: planSummary, steps: planSteps }),
       );
-      yield { type: 'tool_plan', round: toolRound, summary: planSummary, steps: planSteps };
+      yield { type: 'tool_plan', round: toolRound, operationId, summary: planSummary, steps: planSteps };
 
-      if (confirmToolCall) {
+      const skipPlanApproval = this.shouldSkipPlanApproval(planSteps);
+      if (confirmToolCall && !skipPlanApproval) {
         const planDecision = await confirmToolCall({
           name: 'execute_plan',
           args: {
@@ -440,6 +600,7 @@ export class AgentRuntime {
           },
           sessionId,
           senderId: senderId ?? sessionId,
+          operationId,
           kind: 'plan',
           message: '即将执行上述计划。批准后才会开始逐步执行和确认。',
           preview: this.buildPlanPreview(planSummary, planSteps),
@@ -447,10 +608,9 @@ export class AgentRuntime {
           defaultScope: 'once',
         });
 
-        this.auditLogger?.({
+        emitAudit({
           type: 'tool_plan_result',
-          sessionId,
-          senderId: senderId ?? sessionId,
+          operationId,
           allowed: planDecision.allow,
           round: toolRound,
         });
@@ -461,13 +621,31 @@ export class AgentRuntime {
         );
 
         if (!planDecision.allow) {
-          const cancelMsg = '工具未执行：用户拒绝批准本次执行计划。';
-          session.messages.push({ role: 'assistant', content: cancelMsg });
-          this.store?.saveMessage(sessionId, 'assistant', cancelMsg);
-          yield { content: cancelMsg, done: false };
-          yield { content: '', done: true };
+          const reason = '用户拒绝批准本次执行计划。';
+          try {
+            yield* this.streamAdviceOnlyReply(session, sessionId, systemPrompt, reason, signal);
+          } catch {
+            const fallbackMsg = '工具未执行：用户拒绝批准本次执行计划。我可以改为只提供纯文字方案，请重试。';
+            session.messages.push({ role: 'assistant', content: fallbackMsg });
+            this.store?.saveMessage(sessionId, 'assistant', fallbackMsg);
+            yield { content: fallbackMsg, done: false };
+            yield { content: '', done: true };
+          }
           break;
         }
+      } else if (skipPlanApproval) {
+        emitAudit({
+          type: 'tool_plan_result',
+          operationId,
+          allowed: true,
+          round: toolRound,
+          autoApproved: true,
+        });
+        this.store?.saveMessage(
+          sessionId,
+          'assistant',
+          serializeToolPlanResultBlock({ round: toolRound, allowed: true }),
+        );
       }
 
       const assistantMsg: ChatMessage = { role: 'assistant', content: '', tool_calls: toolCalls };
@@ -477,13 +655,19 @@ export class AgentRuntime {
         const tc = toolCalls[index];
         const args = parsedArgsList[index] ?? {};
 
-        this.auditLogger?.({ type: 'tool_call', sessionId, senderId: senderId ?? sessionId, name: tc.function.name });
+        emitAudit({ type: 'tool_call', operationId, name: tc.function.name, toolName: tc.function.name });
 
         const result = this.toolRegistry
           ? await this.toolRegistry.execute(tc.function.name, args, toolContext)
           : { success: false, content: '工具系统未启用' };
 
-        this.auditLogger?.({ type: 'tool_result', sessionId, senderId: senderId ?? sessionId, name: tc.function.name, success: result.success });
+        emitAudit({
+          type: 'tool_result',
+          operationId,
+          name: tc.function.name,
+          toolName: tc.function.name,
+          success: result.success,
+        });
 
         if (!result.success) {
           const msg = result.content || '';
@@ -505,16 +689,21 @@ export class AgentRuntime {
       }
 
       if (stopAfterToolRound) {
-        // 用户拒绝/超时确认时，不再继续让模型生成回复，避免误导性响应
+        // 用户拒绝/超时确认时，不再继续执行工具，而是降级成纯文本建议模式。
         if (accumulatedToolCalls.length > 0) {
           const toolBlockContent = accumulatedToolCalls.map((t) => serializeToolBlock(t)).join('\n');
           this.store?.saveMessage(sessionId, 'assistant', toolBlockContent);
         }
-        const cancelMsg = stopReason ? '工具未执行：' + stopReason : '已取消该操作。';
-        session.messages.push({ role: 'assistant', content: cancelMsg });
-        this.store?.saveMessage(sessionId, 'assistant', cancelMsg);
-        yield { content: cancelMsg, done: false };
-        yield { content: '', done: true };
+        const reason = stopReason ?? '用户取消了该操作。';
+        try {
+          yield* this.streamAdviceOnlyReply(session, sessionId, systemPrompt, reason, signal);
+        } catch {
+          const fallbackMsg = '工具未执行：' + reason + ' 我可以改为只提供纯文字方案，请重试。';
+          session.messages.push({ role: 'assistant', content: fallbackMsg });
+          this.store?.saveMessage(sessionId, 'assistant', fallbackMsg);
+          yield { content: fallbackMsg, done: false };
+          yield { content: '', done: true };
+        }
         break;
       }
     }
@@ -565,6 +754,33 @@ export class AgentRuntime {
     return session?.messages ?? [];
   }
 
+  getAuditTrail(sessionId: string, limit = 200, offset = 0) {
+    return this.store?.listAuditEvents?.(sessionId, limit, offset) ?? [];
+  }
+
+  listPermissionGrants(channel = 'webchat', senderId = ''): PermissionGrant[] {
+    const principalKey = getPrincipalKey(channel, senderId);
+    return this.store?.listPermissionGrants?.(principalKey) ?? [];
+  }
+
+  revokePermissionGrant(grantKey: string, channel = 'webchat', senderId = ''): boolean {
+    const principalKey = getPrincipalKey(channel, senderId);
+    const revoked = this.store?.revokePermissionGrant?.(principalKey, grantKey) ?? false;
+    if (!revoked) return false;
+    for (const [sessionId, grants] of this.sessionPermissionGrants.entries()) {
+      if (this.sessionPrincipals.get(sessionId) !== principalKey) continue;
+      grants.delete(grantKey);
+    }
+    this.auditLogger?.({
+      type: 'permission_grant_revoked',
+      principalKey,
+      channel,
+      senderId,
+      grantKey,
+    });
+    return true;
+  }
+
   /**
    * 获取活跃会话数量
    */
@@ -572,5 +788,3 @@ export class AgentRuntime {
     return this.sessions.size;
   }
 }
-
-

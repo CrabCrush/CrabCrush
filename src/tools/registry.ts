@@ -12,9 +12,17 @@ import type {
   ToolResult,
 } from './types.js';
 
-function rememberGrant(context: ToolContext, grantKey: string | undefined, scope: ConfirmationScope | undefined): void {
-  if (!grantKey || !scope || scope !== 'session') return;
-  context.rememberPermissionGrant?.(grantKey, scope);
+function rememberGrant(
+  context: ToolContext,
+  grantKey: string | undefined,
+  scope: ConfirmationScope | undefined,
+  details?: {
+    action?: string;
+    preview?: ToolConfirmRequest['preview'];
+  },
+): void {
+  if (!grantKey || !scope || (scope !== 'session' && scope !== 'persistent')) return;
+  context.rememberPermissionGrant?.(grantKey, scope, details);
 }
 
 export class ToolRegistry {
@@ -87,10 +95,15 @@ export class ToolRegistry {
         sessionId: context.sessionId,
         senderId: context.senderId,
         kind: 'confirm',
-        scopeOptions: ['once', 'session'],
+        operationId: context.operationId,
         defaultScope: 'once',
         ...tool.buildConfirmRequest?.(args, context),
       };
+      if (!confirmRequest.scopeOptions) {
+        confirmRequest.scopeOptions = confirmRequest.grantKey
+          ? ['once', 'session', 'persistent']
+          : ['once'];
+      }
 
       if (confirmRequest.grantKey && context.hasPermissionGrant?.(confirmRequest.grantKey)) {
         context.audit?.({
@@ -134,7 +147,10 @@ export class ToolRegistry {
           return { success: false, content: `用户拒绝执行工具 "${name}"` };
         }
 
-        rememberGrant(context, confirmRequest.grantKey, decision.scope ?? confirmRequest.defaultScope);
+        rememberGrant(context, confirmRequest.grantKey, decision.scope ?? confirmRequest.defaultScope, {
+          action: name,
+          preview: confirmRequest.preview,
+        });
       }
     }
 

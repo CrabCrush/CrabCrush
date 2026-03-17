@@ -1,9 +1,14 @@
 /**
  * 工作区模块 — 人格化与工作区（DEC-032）
  *
- * 工作区目录存放 IDENTITY.md（AI 身份）、USER.md（用户信息）、SOUL.md（性格边界，可选）。
- * 每次对话前注入工作区内容到 system prompt；工作区为空时注入 Bootstrap 引导（分步询问）。
- * 工作区路径必须与文件工具的 fileBase 一致，确保 write_file 写入的位置与 read 读取的位置相同。
+ * 职责：
+ * - 工作区目录 = fileBase/workspace，存放 IDENTITY.md、USER.md、SOUL.md（人格化）
+ * - 每次对话前读取并注入到 system prompt；空时走 Bootstrap 引导
+ *
+ * 与文件工具的关系：
+ * - 文件工具的根目录是 fileBase（非 fileBase/workspace）。write_file(path) 的 path 为相对 fileBase。
+ * - 因此写入“工作区”内文件时，path 必须带 workspace/ 前缀，例如 workspace/notes.md，才会落到 fileBase/workspace/notes.md。
+ * - 若模型传 path=notes.md，则会写到 fileBase/notes.md（fileBase 根下），不会进 workspace 子目录。
  *
  * 参考：docs/OPENCLAW_ANALYSIS.md、docs/SMART_EXPERIENCE_PLAN.md
  */

@@ -130,4 +130,74 @@ describe('ConversationStore', () => {
     expect(store.listConversations(50, 0, 'dingtalk')).toHaveLength(1);
     expect(store.listConversations(50, 0, 'dingtalk')[0].id).toBe('s2');
   });
+
+  it('persists and queries persistent permission grants', () => {
+    store.savePermissionGrant({
+      principalKey: 'webchat:default',
+      grantKey: 'web:example.com',
+      scope: 'persistent',
+      resourceType: 'domain',
+      resourceValue: 'example.com',
+      meta: { action: 'browse_url' },
+    });
+
+    expect(store.hasActivePermissionGrant('webchat:default', 'web:example.com')).toBe(true);
+    const grants = store.listPermissionGrants('webchat:default');
+    expect(grants).toHaveLength(1);
+    expect(grants[0]).toMatchObject({
+      principalKey: 'webchat:default',
+      grantKey: 'web:example.com',
+      scope: 'persistent',
+      resourceType: 'domain',
+      resourceValue: 'example.com',
+    });
+    expect(grants[0]?.meta).toMatchObject({ action: 'browse_url' });
+  });
+
+  it('revokes persistent permission grants', () => {
+    store.savePermissionGrant({
+      principalKey: 'webchat:default',
+      grantKey: 'file:write:C:/work',
+      scope: 'persistent',
+      resourceType: 'path',
+      resourceValue: 'C:/work',
+      meta: { action: 'write_file' },
+    });
+
+    expect(store.revokePermissionGrant('webchat:default', 'file:write:C:/work')).toBe(true);
+    expect(store.hasActivePermissionGrant('webchat:default', 'file:write:C:/work')).toBe(false);
+    expect(store.listPermissionGrants('webchat:default')).toHaveLength(0);
+  });
+
+  it('stores audit events in chronological order', () => {
+    store.saveAuditEvent({
+      conversationId: 'sess-audit',
+      principalKey: 'webchat:default',
+      eventType: 'tool_plan',
+      operationId: 'op-1',
+      payload: { steps: ['a'] },
+      createdAt: 100,
+    });
+    store.saveAuditEvent({
+      conversationId: 'sess-audit',
+      principalKey: 'webchat:default',
+      eventType: 'tool_result',
+      operationId: 'op-1',
+      toolName: 'write_file',
+      allowed: true,
+      payload: { success: true },
+      createdAt: 200,
+    });
+
+    const events = store.listAuditEvents('sess-audit');
+    expect(events.map((event) => event.eventType)).toEqual(['tool_plan', 'tool_result']);
+    expect(events[1]).toMatchObject({
+      conversationId: 'sess-audit',
+      principalKey: 'webchat:default',
+      operationId: 'op-1',
+      toolName: 'write_file',
+      allowed: true,
+    });
+    expect(events[1]?.payload).toMatchObject({ success: true });
+  });
 });

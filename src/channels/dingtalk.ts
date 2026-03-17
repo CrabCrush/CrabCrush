@@ -26,15 +26,15 @@ const DINGTALK_MARKDOWN_MAX = 4000;
 
 export function parseDingTalkConfirmReply(content: string): {
   action: '允许' | '拒绝';
-  scope: 'once' | 'session';
+  scope: 'once' | 'session' | 'persistent';
   id?: string;
 } | null {
   const trimmed = content.trim();
-  const match = trimmed.match(/^(允许|拒绝)(?:\s+(本会话))?(?:\s+([\w-]+))?$/);
+  const match = trimmed.match(/^(允许|拒绝)(?:\s+(本会话|永久))?(?:\s+([\w-]+))?$/);
   if (!match) return null;
   return {
     action: match[1] as '允许' | '拒绝',
-    scope: match[2] ? 'session' : 'once',
+    scope: match[2] === '本会话' ? 'session' : match[2] === '永久' ? 'persistent' : 'once',
     id: match[3],
   };
 }
@@ -174,7 +174,9 @@ export class DingTalkAdapter implements ChannelAdapter {
           const decision: ToolConfirmDecision = { allow, scope };
           pending.resolve(decision);
           await this.sendReply(payload, allow
-            ? `已允许执行工具：${pending.name}${decision.scope === 'session' ? '（本会话）' : '（仅本次）'}`
+            ? `已允许执行工具：${pending.name}${
+              decision.scope === 'session' ? '（本会话）' : decision.scope === 'persistent' ? '（永久）' : '（仅本次）'
+            }`
             : `已拒绝执行工具：${pending.name}`);
         } else {
           await this.sendReply(payload, '未找到对应的确认请求或已过期。');
@@ -187,7 +189,7 @@ export class DingTalkAdapter implements ChannelAdapter {
       if (pendingForSender) {
         await this.sendReply(
           payload,
-          `你有待确认的操作：${pendingForSender.item.name}。请回复：允许 ${pendingForSender.id} / 允许 本会话 ${pendingForSender.id} / 拒绝 ${pendingForSender.id}`,
+          `你有待确认的操作：${pendingForSender.item.name}。请回复：允许 ${pendingForSender.id} / 允许 本会话 ${pendingForSender.id} / 允许 永久 ${pendingForSender.id} / 拒绝 ${pendingForSender.id}`,
         );
         this.ack(res);
         return;
@@ -223,19 +225,23 @@ export class DingTalkAdapter implements ChannelAdapter {
       // 传入 senderStaffId 用于 Owner 权限判断（DEC-026）
       const toolNames: string[] = [];
       const toolResults: string[] = [];
-      const requestConfirm: ToolConfirmHandler = async ({ name, args, message, preview, defaultScope }) => {
+      const requestConfirm: ToolConfirmHandler = async ({ name, args, message, preview, defaultScope, scopeOptions }) => {
         const id = `confirm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         const timeoutMs = 60_000;
         const sections = [formatPreview(preview), message ? `说明：${message}` : '', formatArgsSummary(args)].filter(Boolean);
+        const lines = [`回复：允许 ${id}`];
+        if (scopeOptions?.includes('session')) lines.push(`或：允许 本会话 ${id}`);
+        if (scopeOptions?.includes('persistent')) lines.push(`或：允许 永久 ${id}`);
+        lines.push(`或：拒绝 ${id}`);
         const prompt = [
           `⚠️ 需要确认：${name}`,
           '',
           ...sections,
           '',
-          `回复：允许 ${id}`,
-          `或：允许 本会话 ${id}`,
-          `或：拒绝 ${id}`,
-          `（默认作用域：${defaultScope === 'session' ? '本会话' : '仅本次'}，${Math.floor(timeoutMs / 1000)} 秒内有效）`,
+          ...lines,
+          `（默认作用域：${
+            defaultScope === 'session' ? '本会话' : defaultScope === 'persistent' ? '永久' : '仅本次'
+          }，${Math.floor(timeoutMs / 1000)} 秒内有效）`,
         ].join('\n');
 
         await this.sendReply(payload, prompt);

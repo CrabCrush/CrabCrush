@@ -23,6 +23,7 @@ export const getCurrentTimeTool: Tool = {
   },
   permission: 'public',
   confirmRequired: false,
+  planPolicy: 'safe_auto',
 
   async execute(args: Record<string, unknown>, _context: ToolContext): Promise<ToolResult> {
     const timezone = (args.timezone as string) || 'Asia/Shanghai';

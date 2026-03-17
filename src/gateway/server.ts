@@ -7,6 +7,7 @@ import type { AgentRuntime, ToolCallEvent, ToolPlanEvent, StreamControlEvent } f
 import type { ToolConfirmDecision, ToolConfirmHandler } from '../tools/types.js';
 import { estimateCost } from '../models/pricing.js';
 import type { ChatChunk } from '../models/provider.js';
+import { getPrincipalKey } from '../permissions/utils.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -59,6 +60,14 @@ export async function startGateway(options: GatewayOptions = {}) {
   const rateLimitWindowMs = 10_000;
   const rateLimitMax = 5;
   const rateLimits = new Map<string, { count: number; resetAt: number }>();
+  // 定期清理已过期的限流记录，防止长期运行后内存持续增长
+  const rateLimitCleanupInterval = setInterval(() => {
+    const now = Date.now();
+    for (const [key, entry] of rateLimits.entries()) {
+      if (entry.resetAt <= now) rateLimits.delete(key);
+    }
+  }, 60_000);
+  rateLimitCleanupInterval.unref();
   const allowRequest = (key: string): boolean => {
     const now = Date.now();
     const existing = rateLimits.get(key);
@@ -86,6 +95,7 @@ export async function startGateway(options: GatewayOptions = {}) {
     const agent = options.agent;
 
     app.get('/ws', { websocket: true }, (socket, req) => {
+      const currentPrincipalKey = () => getPrincipalKey('webchat');
       // Token 校验
       if (!validateToken(req.query as Record<string, unknown>)) {
         socket.send(JSON.stringify({ type: 'error', message: '无效的访问令牌' }));
@@ -100,12 +110,22 @@ export async function startGateway(options: GatewayOptions = {}) {
         resolve: (decision: ToolConfirmDecision) => void;
         timeout: NodeJS.Timeout;
         name: string;
+        operationId?: string;
       }>();
 
       const requestConfirm: ToolConfirmHandler = async (request) => {
         const id = `confirm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         const timeoutMs = 30_000;
-        audit?.({ type: 'tool_confirm_request', sessionId, name: request.name, kind: request.kind, grantKey: request.grantKey });
+        audit?.({
+          type: 'tool_confirm_request',
+          conversationId: sessionId,
+          sessionId,
+          principalKey: currentPrincipalKey(),
+          name: request.name,
+          kind: request.kind,
+          grantKey: request.grantKey,
+          operationId: request.operationId,
+        });
 
         return await new Promise<ToolConfirmDecision>((resolve) => {
           const timeout = setTimeout(() => {
@@ -113,7 +133,7 @@ export async function startGateway(options: GatewayOptions = {}) {
             resolve({ allow: false, scope: request.defaultScope });
           }, timeoutMs);
 
-          pendingConfirms.set(id, { resolve, timeout, name: request.name });
+          pendingConfirms.set(id, { resolve, timeout, name: request.name, operationId: request.operationId });
           if (socket.readyState === 1) {
             socket.send(JSON.stringify({
               type: 'confirm',
@@ -162,9 +182,18 @@ export async function startGateway(options: GatewayOptions = {}) {
               pendingConfirms.delete(msg.id);
               const decision: ToolConfirmDecision = {
                 allow: Boolean(msg.allow),
-                scope: msg.scope === 'session' ? 'session' : 'once',
+                scope: msg.scope === 'session' ? 'session' : msg.scope === 'persistent' ? 'persistent' : 'once',
               };
-              audit?.({ type: 'tool_confirm_result', sessionId, name: pending.name, allowed: decision.allow, scope: decision.scope });
+              audit?.({
+                type: 'tool_confirm_result',
+                conversationId: sessionId,
+                sessionId,
+                principalKey: currentPrincipalKey(),
+                name: pending.name,
+                allowed: decision.allow,
+                scope: decision.scope,
+                operationId: pending.operationId,
+              });
               pending.resolve(decision);
             }
             return;
@@ -183,6 +212,33 @@ export async function startGateway(options: GatewayOptions = {}) {
             const history = agent.getHistory(sessionId, limit, offset);
             const hasMore = history.length >= limit;
             socket.send(JSON.stringify({ type: 'history', sessionId, messages: history, offset, hasMore }));
+            return;
+          }
+
+          if (msg.type === 'loadAuditEvents') {
+            const limit = typeof msg.limit === 'number' ? msg.limit : 200;
+            const offset = typeof msg.offset === 'number' ? msg.offset : 0;
+            const events = agent.getAuditTrail(sessionId, limit, offset);
+            socket.send(JSON.stringify({ type: 'audit_events', sessionId, events, offset }));
+            return;
+          }
+
+          if (msg.type === 'loadPermissionGrants') {
+            const grants = agent.listPermissionGrants('webchat');
+            socket.send(JSON.stringify({ type: 'permission_grants', grants }));
+            return;
+          }
+
+          if (msg.type === 'revokePermissionGrant') {
+            const grantKey = typeof msg.grantKey === 'string' ? msg.grantKey : '';
+            if (!grantKey) {
+              socket.send(JSON.stringify({ type: 'error', message: '缺少 grantKey' }));
+              return;
+            }
+            const revoked = agent.revokePermissionGrant(grantKey, 'webchat');
+            socket.send(JSON.stringify({ type: 'permission_grant_revoked', grantKey, revoked }));
+            const grants = agent.listPermissionGrants('webchat');
+            socket.send(JSON.stringify({ type: 'permission_grants', grants }));
             return;
           }
 
@@ -210,7 +266,15 @@ export async function startGateway(options: GatewayOptions = {}) {
               return;
             }
 
-            audit?.({ type: 'chat_request', sessionId, senderId: sessionId, ip, length: String(msg.content).length });
+            audit?.({
+              type: 'chat_request',
+              conversationId: sessionId,
+              sessionId,
+              principalKey: currentPrincipalKey(),
+              senderId: sessionId,
+              ip,
+              length: String(msg.content).length,
+            });
             currentAbort?.abort();
             const abort = new AbortController();
             // 中断上一个进行中的请求（如果有）
@@ -325,6 +389,12 @@ export async function startGateway(options: GatewayOptions = {}) {
 
   const publicDir = join(__dirname, '../../public');
   await app.register(fastifyStatic, { root: publicDir, prefix: '/' });
+
+  // 服务关闭时清理定时器
+  app.addHook('onClose', async () => {
+    clearInterval(rateLimitCleanupInterval);
+  });
+
   await app.listen({ port, host });
   return app;
 }

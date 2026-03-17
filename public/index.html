@@ -476,6 +476,14 @@
       <p>做你的虾兵蟹将 —— 随时为你服务<br>输入消息开始对话吧</p>
     </div>
   </div>
+  <details id="audit-details" style="margin:0 1rem 0.75rem;padding:0.75rem 0.9rem;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:10px">
+    <summary style="cursor:pointer;font-size:0.9rem;color:var(--text-muted)">审计回放</summary>
+    <div id="audit-timeline" style="margin-top:0.75rem;font-size:0.82rem;color:var(--text-muted)">当前会话暂无可回放的执行审计。</div>
+  </details>
+  <details id="grants-details" style="margin:0 1rem 0.75rem;padding:0.75rem 0.9rem;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:10px">
+    <summary style="cursor:pointer;font-size:0.9rem;color:var(--text-muted)">持久授权记录</summary>
+    <div id="grants-panel" style="margin-top:0.75rem;font-size:0.82rem;color:var(--text-muted)">当前暂无持久授权记录。</div>
+  </details>
   <div id="input-area" class="">
     <textarea id="input" placeholder="输入消息... (Enter 发送, Shift+Enter 换行, Esc 停止)" rows="1"></textarea>
     <button id="send" class="action-btn" disabled>发送</button>
@@ -494,10 +502,11 @@
       </div>
       <div class="confirm-args" id="confirm-args"></div>
       <div id="confirm-scope" style="display:none;margin-top:0.8rem">
-        <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:0.45rem">授权范围</div>
+        <div id="confirm-scope-label" style="font-size:0.8rem;color:var(--text-muted);margin-bottom:0.45rem">授权范围</div>
         <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
           <button id="confirm-allow-once" class="action-btn" style="background:var(--primary)">仅本次允许</button>
           <button id="confirm-allow-session" class="action-btn" style="background:#2563eb">本会话允许</button>
+          <button id="confirm-allow-persistent" class="action-btn" style="background:#0f766e">永久允许</button>
         </div>
       </div>
       <div class="confirm-actions">
@@ -642,7 +651,11 @@
       const url = new URL(location.href);
       url.searchParams.set('session', sessionId);
       history.replaceState(null, '', url.toString());
-      if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'loadHistory', sessionId, limit: 100 }));
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'loadHistory', sessionId, limit: 100 }));
+        requestAuditEvents();
+        requestPermissionGrants();
+      }
       closeSessionsSidebar();
     }
 
@@ -653,9 +666,16 @@
       url.searchParams.delete('session');
       history.replaceState(null, '', url.toString());
       messagesEl.innerHTML = '<div class="welcome"><div class="emoji">🦀</div><h2>你好！我是 CrabCrush</h2><p>做你的虾兵蟹将 —— 随时为你服务<br>输入消息开始对话吧</p></div>';
+      if (auditTimeline) auditTimeline.innerHTML = '<div style="color:var(--text-muted)">当前会话暂无可回放的执行审计。</div>';
+      if (auditDetails) auditDetails.open = false;
+      if (grantsPanel) grantsPanel.innerHTML = '<div style="color:var(--text-muted)">当前暂无持久授权记录。</div>';
+      if (grantsDetails) grantsDetails.open = false;
       welcomeShown = true;
       // 通知服务端重置 sessionId，否则下一条消息会发到旧会话
-      if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'newSession' }));
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'newSession' }));
+        requestPermissionGrants();
+      }
       closeSessionsSidebar();
     }
 
@@ -675,8 +695,14 @@
     const confirmPreviewRisk = document.getElementById('confirm-preview-risk');
     const confirmPreviewTargets = document.getElementById('confirm-preview-targets');
     const confirmScope = document.getElementById('confirm-scope');
+    const confirmScopeLabel = document.getElementById('confirm-scope-label');
+    const auditDetails = document.getElementById('audit-details');
+    const auditTimeline = document.getElementById('audit-timeline');
+    const grantsDetails = document.getElementById('grants-details');
+    const grantsPanel = document.getElementById('grants-panel');
     const confirmAllowOnceBtn = document.getElementById('confirm-allow-once');
     const confirmAllowSessionBtn = document.getElementById('confirm-allow-session');
+    const confirmAllowPersistentBtn = document.getElementById('confirm-allow-persistent');
     const confirmDenyBtn = document.getElementById('confirm-deny');
 
     let ws;
@@ -691,6 +717,132 @@
 
     const confirmQueue = [];
     let activeConfirm = null;
+
+    function formatAuditTime(ts) {
+      if (!ts) return '';
+      try {
+        return new Date(ts).toLocaleTimeString('zh-CN', { hour12: false });
+      } catch (_) {
+        return '';
+      }
+    }
+
+    function summarizeAuditEvent(event) {
+      const payload = event.payload || {};
+      if (event.eventType === 'tool_plan') {
+        const steps = Array.isArray(payload.steps) ? payload.steps.length : 0;
+        return `计划审批：${steps} 个步骤待执行`;
+      }
+      if (event.eventType === 'tool_plan_result') return event.allowed ? '已批准执行计划' : '已拒绝执行计划';
+      if (event.eventType === 'permission_request_result') {
+        return `${event.allowed ? '已授权' : '已拒绝'}权限：${payload.action || event.eventType}`;
+      }
+      if (event.eventType === 'tool_confirm_request') return `等待确认：${payload.name || event.toolName || '未命名操作'}`;
+      if (event.eventType === 'tool_confirm_result' || event.eventType === 'tool_confirm') {
+        return `${event.allowed ? '已允许' : '已拒绝'}执行：${payload.name || event.toolName || '未命名操作'}`;
+      }
+      if (event.eventType === 'tool_call') return `开始执行工具：${payload.name || event.toolName || '未命名工具'}`;
+      if (event.eventType === 'tool_result') {
+        return `${payload.success ? '执行成功' : '执行失败'}：${payload.name || event.toolName || '未命名工具'}`;
+      }
+      return payload.name || payload.action || event.eventType;
+    }
+
+    function renderAuditEvents(events) {
+      if (!auditTimeline) return;
+      const replayable = Array.isArray(events) ? events.filter((event) => [
+        'tool_plan',
+        'tool_plan_result',
+        'tool_confirm_request',
+        'tool_confirm_result',
+        'tool_confirm',
+        'permission_request_result',
+        'tool_call',
+        'tool_result',
+      ].includes(event.eventType)) : [];
+      if (replayable.length === 0) {
+        auditTimeline.innerHTML = '<div style="color:var(--text-muted)">当前会话暂无可回放的执行审计。</div>';
+        return;
+      }
+      auditTimeline.innerHTML = replayable.map((event) => `
+        <div style="padding:0.55rem 0;border-bottom:1px solid rgba(255,255,255,0.06)">
+          <div style="display:flex;justify-content:space-between;gap:0.6rem">
+            <strong style="color:var(--text)">${escapeHtml(summarizeAuditEvent(event))}</strong>
+            <span style="color:var(--text-muted)">${escapeHtml(formatAuditTime(event.createdAt))}</span>
+          </div>
+          ${event.scope ? `<div style="margin-top:0.2rem;color:var(--text-muted)">范围：${escapeHtml(String(event.scope))}</div>` : ''}
+          ${event.grantKey ? `<div style="margin-top:0.2rem;color:var(--text-muted)">授权键：${escapeHtml(String(event.grantKey))}</div>` : ''}
+        </div>
+      `).join('');
+    }
+
+    function requestAuditEvents() {
+      if (!sessionId || !ws || ws.readyState !== 1) return;
+      ws.send(JSON.stringify({ type: 'loadAuditEvents', sessionId, limit: 200 }));
+    }
+
+    function formatGrantTime(ts) {
+      if (!ts) return '';
+      try {
+        return new Date(ts).toLocaleString('zh-CN', { hour12: false });
+      } catch (_) {
+        return '';
+      }
+    }
+
+    function describeGrant(grant) {
+      const typeMap = { path: '路径', domain: '域名', database: '数据库', other: '其他' };
+      return {
+        title: grant.resourceValue || grant.grantKey || '未命名资源',
+        typeLabel: typeMap[grant.resourceType] || '其他',
+        action: grant.meta?.action || '',
+      };
+    }
+
+    function renderPermissionGrants(grants) {
+      if (!grantsPanel) return;
+      const list = Array.isArray(grants) ? grants : [];
+      if (list.length === 0) {
+        grantsPanel.innerHTML = '<div style="color:var(--text-muted)">当前暂无持久授权记录。</div>';
+        return;
+      }
+      grantsPanel.innerHTML = list.map((grant) => {
+        const info = describeGrant(grant);
+        return `
+          <div style="padding:0.65rem 0;border-bottom:1px solid rgba(255,255,255,0.06)">
+            <div style="display:flex;justify-content:space-between;gap:0.8rem;align-items:flex-start">
+              <div>
+                <div style="font-weight:600;color:var(--text)">${escapeHtml(String(info.title))}</div>
+                <div style="margin-top:0.2rem;color:var(--text-muted)">类型：${escapeHtml(String(info.typeLabel))}${info.action ? ` | 操作：${escapeHtml(String(info.action))}` : ''}</div>
+                <div style="margin-top:0.2rem;color:var(--text-muted)">授权键：${escapeHtml(String(grant.grantKey || ''))}</div>
+                <div style="margin-top:0.2rem;color:var(--text-muted)">创建：${escapeHtml(formatGrantTime(grant.createdAt))}</div>
+                <div style="margin-top:0.2rem;color:var(--text-muted)">最近使用：${escapeHtml(formatGrantTime(grant.lastUsedAt))}</div>
+              </div>
+              <button
+                type="button"
+                data-grant-key="${escapeHtml(String(grant.grantKey || ''))}"
+                style="padding:0.35rem 0.55rem;border:none;border-radius:6px;background:#7f1d1d;color:#fff;cursor:pointer"
+                onclick="revokeGrant(this)"
+              >撤销</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function requestPermissionGrants() {
+      if (!ws || ws.readyState !== 1) return;
+      ws.send(JSON.stringify({ type: 'loadPermissionGrants' }));
+    }
+
+    function revokeGrant(button) {
+      const grantKey = button?.dataset?.grantKey;
+      if (!grantKey || !ws || ws.readyState !== 1) return;
+      button.disabled = true;
+      button.textContent = '撤销中...';
+      ws.send(JSON.stringify({ type: 'revokePermissionGrant', grantKey }));
+    }
+    window.revokeGrant = revokeGrant;
 
     function showNextConfirm() {
       if (activeConfirm || confirmQueue.length === 0) return;
@@ -715,9 +867,15 @@
         confirmPreview.style.display = 'none';
       }
       const scopeOptions = activeConfirm.scopeOptions || ['once'];
-      if (confirmScope) confirmScope.style.display = (scopeOptions.length > 1 || scopeOptions.includes('once')) ? 'block' : 'none';
-      if (confirmAllowOnceBtn) confirmAllowOnceBtn.style.display = scopeOptions.includes('once') ? 'inline-flex' : 'none';
-      if (confirmAllowSessionBtn) confirmAllowSessionBtn.style.display = scopeOptions.includes('session') ? 'inline-flex' : 'none';
+      const showScopeChoices = activeConfirm.kind !== 'plan' && scopeOptions.length > 1;
+      if (confirmScope) confirmScope.style.display = scopeOptions.includes('once') || showScopeChoices ? 'block' : 'none';
+      if (confirmScopeLabel) confirmScopeLabel.style.display = showScopeChoices ? 'block' : 'none';
+      if (confirmAllowOnceBtn) {
+        confirmAllowOnceBtn.style.display = scopeOptions.includes('once') ? 'inline-flex' : 'none';
+        confirmAllowOnceBtn.textContent = activeConfirm.kind === 'plan' ? '批准执行' : showScopeChoices ? '仅本次允许' : '允许';
+      }
+      if (confirmAllowSessionBtn) confirmAllowSessionBtn.style.display = showScopeChoices && scopeOptions.includes('session') ? 'inline-flex' : 'none';
+      if (confirmAllowPersistentBtn) confirmAllowPersistentBtn.style.display = showScopeChoices && scopeOptions.includes('persistent') ? 'inline-flex' : 'none';
       if (confirmOverlay) confirmOverlay.classList.add('visible');
     }
 
@@ -752,12 +910,16 @@
         statusEl.className = 'connected';
         if (!isStreaming) sendBtn.disabled = false;
 
+        // 持久授权按 principal（webchat）展示，与 session 无关，连接后即拉取
+        requestPermissionGrants();
+
         // 刷新/重连时优先从 URL 读取 sessionId，确保加载正确会话
         const urlParams = new URLSearchParams(location.search);
         const sessionFromUrl = urlParams.get('session');
         if (sessionFromUrl) sessionId = sessionFromUrl;
         if (sessionId) {
           ws.send(JSON.stringify({ type: 'loadHistory', sessionId, limit: 100 }));
+          requestAuditEvents();
         }
       };
 
@@ -814,6 +976,8 @@
             url.searchParams.set('session', sessionId);
             history.replaceState(null, '', url.toString());
           }
+          requestAuditEvents();
+          requestPermissionGrants();
           hasMoreHistory = Boolean(msg.hasMore);
           const append = (msg.offset || 0) > 0;
           const fragment = renderMessagesToFragment(msg.messages || []);
@@ -851,6 +1015,12 @@
             }
             messagesEl.scrollTop = prevScrollTop + (messagesEl.scrollHeight - prevScrollHeight);
           }
+        } else if (msg.type === 'audit_events') {
+          renderAuditEvents(msg.events || []);
+        } else if (msg.type === 'permission_grants') {
+          renderPermissionGrants(msg.grants || []);
+        } else if (msg.type === 'permission_grant_revoked') {
+          if (!msg.revoked) addMessage('error', '撤销授权失败：未找到该授权记录。');
         } else if (msg.type === 'stream_control') {
           if (msg.action === 'clear_last') {
             if (currentBotMsg) {
@@ -915,6 +1085,8 @@
           if (msg.usage || msg.model || msg.cost) {
             showUsage(msg.usage, msg.model, msg.cost);
           }
+          requestAuditEvents();
+          requestPermissionGrants();
           finishStreaming();
 
         } else if (msg.type === 'error') {
@@ -1053,6 +1225,7 @@
     stopBtn.addEventListener('click', stopGeneration);
     if (confirmAllowOnceBtn) confirmAllowOnceBtn.addEventListener('click', () => resolveConfirm(true, 'once'));
     if (confirmAllowSessionBtn) confirmAllowSessionBtn.addEventListener('click', () => resolveConfirm(true, 'session'));
+    if (confirmAllowPersistentBtn) confirmAllowPersistentBtn.addEventListener('click', () => resolveConfirm(true, 'persistent'));
     if (confirmDenyBtn) confirmDenyBtn.addEventListener('click', () => resolveConfirm(false, 'once'));
     if (confirmOverlay) {
       confirmOverlay.addEventListener('click', (e) => {
@@ -1098,17 +1271,4 @@
   </script>
 </body>
 </html>
-
-
-
-
-
-
-
-
-
-
-
-
-
 

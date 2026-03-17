@@ -38,8 +38,11 @@ export interface ToolDefinition {
  */
 export type ToolPermission = 'public' | 'owner';
 
+/** 计划审批策略 */
+export type ToolPlanPolicy = 'always' | 'covered_only' | 'safe_auto';
+
 /** 确认作用域 */
-export type ConfirmationScope = 'once' | 'session';
+export type ConfirmationScope = 'once' | 'session' | 'persistent';
 
 /** 执行预览 */
 export interface ToolExecutionPreview {
@@ -55,6 +58,8 @@ export interface ToolConfirmRequest {
   args: Record<string, unknown>;
   sessionId: string;
   senderId: string;
+  /** 结构化审计/回放用操作 ID */
+  operationId?: string;
   /** confirmRequired(工具级) 或 permission_request(请求级) */
   kind?: 'confirm' | 'permission_request' | 'plan';
   /** 可选说明文案 */
@@ -83,6 +88,7 @@ export interface PermissionRequest {
   action: string;
   message: string;
   params?: Record<string, unknown>;
+  operationId?: string;
   preview?: ToolExecutionPreview;
   scopeOptions?: ConfirmationScope[];
   defaultScope?: ConfirmationScope;
@@ -93,22 +99,35 @@ export interface PermissionRequest {
  * 工具执行上下文
  */
 export interface ToolContext {
+  /** 渠道类型（webchat / dingtalk 等） */
+  channel?: string;
   /** 发送者 ID（钉钉 userId / WebChat sessionId） */
   senderId: string;
+  /** 权限主体键（如 webchat:default / dingtalk:staff-001） */
+  principalKey?: string;
   /** 是否是 owner */
   isOwner: boolean;
   /** 会话 ID */
   sessionId: string;
+  /** 当前执行链操作 ID，用于串起 plan / confirm / tool_result */
+  operationId?: string;
   /** 当前用户消息（可选，用于安全策略） */
   userMessage?: string;
   /** 需要确认时的回调（由通道层提供） */
   confirm?: ToolConfirmHandler;
   /** 运行时权限请求（动态） */
   requestPermission?: (request: PermissionRequest) => Promise<boolean>;
-  /** 检查是否已有会话级授权 */
-  hasPermissionGrant?: (grantKey: string) => boolean;
-  /** 记录会话级授权 */
-  rememberPermissionGrant?: (grantKey: string, scope: ConfirmationScope) => void;
+  /** 检查是否已有授权；touch=false 时仅探测，不刷新持久授权最近使用时间 */
+  hasPermissionGrant?: (grantKey: string, options?: { touch?: boolean }) => boolean;
+  /** 记录授权（session / persistent） */
+  rememberPermissionGrant?: (
+    grantKey: string,
+    scope: ConfirmationScope,
+    details?: {
+      action?: string;
+      preview?: ToolExecutionPreview;
+    },
+  ) => void;
   /** 审计日志回调（可选） */
   audit?: (event: { type: string; [key: string]: unknown }) => void;
 }
@@ -132,11 +151,14 @@ export interface Tool {
   permission: ToolPermission;
   /** 是否需要用户确认才执行（高危操作，详见 DEC-026） */
   confirmRequired: boolean;
+  /** 计划审批策略：默认 covered_only；safe_auto 用于低风险只读操作 */
+  planPolicy?: ToolPlanPolicy;
   /** 构建确认请求（用于执行预览、会话授权作用域） */
   buildConfirmRequest?(args: Record<string, unknown>, context: ToolContext): Partial<ToolConfirmRequest>;
+  /** 构建请求级权限元数据（用于计划阶段判断是否已被授权覆盖） */
+  buildPermissionRequest?(args: Record<string, unknown>, context: ToolContext): Partial<PermissionRequest> | null;
   /** 执行前预检：返回 ToolResult 则直接返回，不再确认/执行 */
   precheck?(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult | null>;
   /** 执行工具 */
   execute(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult>;
 }
-

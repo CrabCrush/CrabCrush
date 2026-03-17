@@ -447,4 +447,11 @@ describe('write_file tool', () => {
     expect(writeFileTool.confirmRequired).toBe(true);
   });
 });
-
+describe('tool plan policy', () => {
+  it('marks low-risk built-in tools as safe_auto', () => {
+    expect(getCurrentTimeTool.planPolicy).toBe('safe_auto');
+    expect(readFileTool.planPolicy).toBe('safe_auto');
+    expect(listFilesTool.planPolicy).toBe('safe_auto');
+    expect(writeFileTool.planPolicy).toBeUndefined();
+  });
+});

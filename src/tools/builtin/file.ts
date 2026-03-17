@@ -12,6 +12,7 @@ import { mkdirSync } from 'node:fs';
 import { resolve, join, relative, dirname, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
 import type {
+  PermissionRequest,
   Tool,
   ToolConfirmRequest,
   ToolContext,
@@ -60,6 +61,31 @@ function getListGrantKey(fullPath: string): string {
   return `file:list:${fullPath}`;
 }
 
+/** 仅当 path 为绝对路径（fileBase 外）时使用；支持 persistent，选「永久允许」后同路径/同目录不再弹窗 */
+function buildOutOfBasePermissionRequest(
+  action: 'read_file' | 'list_files',
+  fullPath: string,
+  params: Record<string, unknown>,
+  displayPath: string,
+): PermissionRequest {
+  return {
+    action,
+    message: action === 'read_file'
+      ? `是否允许读取该文件？\n${displayPath}`
+      : `是否允许扫描该目录？\n${displayPath}`,
+    params,
+    grantKey: action === 'read_file' ? getDirectoryGrantKey('read_file', fullPath) : getListGrantKey(fullPath),
+    scopeOptions: ['once', 'session', 'persistent'],
+    defaultScope: 'once',
+    preview: previewForPath(
+      action === 'read_file' ? '读取文件' : '扫描目录',
+      action === 'read_file' ? '该操作将读取 fileBase 之外的本地文件。' : '该操作将扫描 fileBase 之外的目录结构。',
+      fullPath,
+      'medium',
+    ),
+  };
+}
+
 async function requestOutOfBasePermission(
   context: ToolContext,
   action: 'read_file' | 'list_files',
@@ -75,18 +101,8 @@ async function requestOutOfBasePermission(
     return { success: false, content: '路径超出允许范围，需要通道支持权限确认。' };
   }
   const allowed = await context.requestPermission({
-    action,
-    message,
-    params,
+    ...buildOutOfBasePermissionRequest(action, fullPath, params, message.split('\n').slice(1).join('\n') || fullPath),
     grantKey,
-    scopeOptions: ['once', 'session'],
-    defaultScope: 'once',
-    preview: previewForPath(
-      action === 'read_file' ? '读取文件' : '扫描目录',
-      action === 'read_file' ? '该操作将读取 fileBase 之外的本地文件。' : '该操作将扫描 fileBase 之外的目录结构。',
-      fullPath,
-      'medium',
-    ),
   });
   if (!allowed) return { success: false, content: `用户拒绝执行工具 "${action}"` };
   return null;
@@ -124,6 +140,14 @@ export function createReadFileTool(config?: { fileBase?: string }): Tool {
     },
     permission: 'owner',
     confirmRequired: false,
+    planPolicy: 'safe_auto',
+    buildPermissionRequest(args: Record<string, unknown>) {
+      const pathArg = args.path as string;
+      if (!pathArg || typeof pathArg !== 'string') return null;
+      const rawPath = pathArg.trim();
+      if (!isAbsolute(rawPath)) return null;
+      return buildOutOfBasePermissionRequest('read_file', rawPath, { path: rawPath }, rawPath);
+    },
 
     async execute(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {
       const pathArg = args.path as string;
@@ -243,6 +267,19 @@ export function createListFilesTool(config?: { fileBase?: string }): Tool {
     },
     permission: 'owner',
     confirmRequired: false,
+    planPolicy: 'safe_auto',
+    buildPermissionRequest(args: Record<string, unknown>) {
+      const rawPath = ((args.path as string) || '.').trim() || '.';
+      const pattern = (args.pattern as string)?.trim() || '';
+      const recursive = Boolean(args.recursive);
+      if (!isAbsolute(rawPath)) return null;
+      return buildOutOfBasePermissionRequest(
+        'list_files',
+        rawPath,
+        { path: rawPath, pattern, recursive },
+        rawPath,
+      );
+    },
 
     async execute(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {
       const rawPath = ((args.path as string) || '.').trim() || '.';
@@ -330,13 +367,13 @@ export function createWriteFileTool(config?: { fileBase?: string }): Tool {
   return {
     definition: {
       name: 'write_file',
-      description: '将内容写入本地文件。当用户要求「保存」「写入」「创建文件」「修改/更新现有文件」时调用。仅可写入配置的根目录下（默认 ~/.crabcrush）。若目标文件已存在，必须设置 overwrite=true，之后再由确认流程批准覆盖。',
+      description: '将内容写入本地文件。当用户要求「保存」「写入」「创建文件」「修改/更新现有文件」时调用。仅可写入配置的根目录（fileBase）下。path 始终为相对 fileBase：写工作区人格/笔记请用 workspace/ 前缀（如 workspace/notes.md），否则会写到 fileBase 根下。若目标文件已存在，须设 overwrite=true 并经确认。',
       parameters: {
         type: 'object',
         properties: {
           path: {
             type: 'string',
-            description: '相对于根目录的文件路径，如 workspace/notes.md',
+            description: '相对 fileBase 的路径。工作区文件用 workspace/ 前缀，如 workspace/notes.md；否则写到 fileBase 根下',
           },
           content: {
             type: 'string',
@@ -364,7 +401,7 @@ export function createWriteFileTool(config?: { fileBase?: string }): Tool {
       return {
         message: overwrite ? '该操作将覆盖或创建本地文件，请确认是否继续。' : '该操作将创建本地文件，请确认是否继续。',
         grantKey: getDirectoryGrantKey('write_file', fullPath),
-        scopeOptions: ['once', 'session'],
+        scopeOptions: ['once', 'session', 'persistent'],
         defaultScope: 'once',
         preview: {
           title: overwrite ? '写入或覆盖文件' : '写入文件',

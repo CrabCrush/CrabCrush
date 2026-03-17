@@ -1,14 +1,17 @@
 import { describe, it, expect } from 'vitest';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { AgentRuntime, type ToolPlanEvent, type ToolCallEvent } from '../src/agent/runtime.js';
 import { ToolRegistry } from '../src/tools/registry.js';
 import type { ChatChunk, ChatMessage, ChatOptions } from '../src/models/provider.js';
-import type { ConversationStore } from '../src/storage/database.js';
+import { ConversationStore } from '../src/storage/database.js';
 import type { Tool } from '../src/tools/types.js';
 
 class MockRouter {
   private round = 0;
 
-  async *chat(_messages: ChatMessage[], _options: ChatOptions = {}): AsyncIterable<ChatChunk> {
+  async *chat(_messages: ChatMessage[], options: ChatOptions = {}): AsyncIterable<ChatChunk> {
     if (this.round++ === 0) {
       yield {
         content: '',
@@ -25,6 +28,12 @@ class MockRouter {
           },
         ],
       };
+      return;
+    }
+
+    if (!options.tools || options.tools.length === 0) {
+      yield { content: '工具未执行，我先给你一个不动手的方案。', done: false };
+      yield { content: '', done: true, model: 'mock-model' };
       return;
     }
 
@@ -115,6 +124,184 @@ class MockOverwriteRetryRouter {
 
     yield { content: '已完成覆盖', done: false };
     yield { content: '', done: true, model: 'mock-model' };
+  }
+}
+
+class PersistentGrantRouter {
+  async *chat(messages: ChatMessage[], _options: ChatOptions = {}): AsyncIterable<ChatChunk> {
+    const toolMessages = messages.filter((message) => message.role === 'tool').length;
+    if (toolMessages === 0) {
+      yield {
+        content: '',
+        done: true,
+        model: 'mock-model',
+        toolCalls: [
+          {
+            id: 'call-persistent-1',
+            type: 'function',
+            function: {
+              name: 'secure_action',
+              arguments: JSON.stringify({ path: 'workspace/plan.md' }),
+            },
+          },
+        ],
+      };
+      return;
+    }
+
+    yield { content: '已完成安全操作', done: false };
+    yield { content: '', done: true, model: 'mock-model' };
+  }
+}
+
+class PermissionGrantRouter {
+  async *chat(messages: ChatMessage[], _options: ChatOptions = {}): AsyncIterable<ChatChunk> {
+    const toolMessages = messages.filter((message) => message.role === 'tool').length;
+    if (toolMessages === 0) {
+      yield {
+        content: '',
+        done: true,
+        model: 'mock-model',
+        toolCalls: [
+          {
+            id: 'call-permission-1',
+            type: 'function',
+            function: {
+              name: 'scan_like',
+              arguments: JSON.stringify({ path: 'C:/secured/docs' }),
+            },
+          },
+        ],
+      };
+      return;
+    }
+
+    yield { content: '已完成扫描', done: false };
+    yield { content: '', done: true, model: 'mock-model' };
+  }
+}
+
+class PerRequestSecureRouter {
+  async *chat(messages: ChatMessage[], _options: ChatOptions = {}): AsyncIterable<ChatChunk> {
+    const lastMessage = messages[messages.length - 1];
+    if (lastMessage?.role === 'tool') {
+      yield { content: '已完成安全操作', done: false };
+      yield { content: '', done: true, model: 'mock-model' };
+      return;
+    }
+
+    yield {
+      content: '',
+      done: true,
+      model: 'mock-model',
+      toolCalls: [
+        {
+          id: 'call-secure-per-request-1',
+          type: 'function',
+          function: {
+            name: 'secure_action',
+            arguments: JSON.stringify({ path: 'workspace/plan.md' }),
+          },
+        },
+      ],
+    };
+  }
+}
+
+class MultiStepCoveredRouter {
+  async *chat(messages: ChatMessage[], _options: ChatOptions = {}): AsyncIterable<ChatChunk> {
+    const toolMessages = messages.filter((message) => message.role === 'tool').length;
+    if (toolMessages >= 2) {
+      yield { content: '已完成多步安全操作', done: false };
+      yield { content: '', done: true, model: 'mock-model' };
+      return;
+    }
+
+    yield {
+      content: '',
+      done: true,
+      model: 'mock-model',
+      toolCalls: [
+        {
+          id: 'call-covered-1',
+          type: 'function',
+          function: {
+            name: 'secure_fetch',
+            arguments: JSON.stringify({ url: 'https://example.com' }),
+          },
+        },
+        {
+          id: 'call-covered-2',
+          type: 'function',
+          function: {
+            name: 'secure_write',
+            arguments: JSON.stringify({ path: 'C:/secured/docs/report.md' }),
+          },
+        },
+      ],
+    };
+  }
+}
+
+class MixedCoverageRouter {
+  async *chat(messages: ChatMessage[], _options: ChatOptions = {}): AsyncIterable<ChatChunk> {
+    const toolMessages = messages.filter((message) => message.role === 'tool').length;
+    if (toolMessages >= 2) {
+      yield { content: '已完成混合授权任务', done: false };
+      yield { content: '', done: true, model: 'mock-model' };
+      return;
+    }
+
+    yield {
+      content: '',
+      done: true,
+      model: 'mock-model',
+      toolCalls: [
+        {
+          id: 'call-mixed-1',
+          type: 'function',
+          function: {
+            name: 'secure_fetch',
+            arguments: JSON.stringify({ url: 'https://example.com' }),
+          },
+        },
+        {
+          id: 'call-mixed-2',
+          type: 'function',
+          function: {
+            name: 'secure_write',
+            arguments: JSON.stringify({ path: 'C:/secured/docs/needs-approval.md' }),
+          },
+        },
+      ],
+    };
+  }
+}
+
+class SafeAutoRouter {
+  async *chat(messages: ChatMessage[], _options: ChatOptions = {}): AsyncIterable<ChatChunk> {
+    const lastMessage = messages[messages.length - 1];
+    if (lastMessage?.role === 'tool') {
+      yield { content: '当前时间已返回', done: false };
+      yield { content: '', done: true, model: 'mock-model' };
+      return;
+    }
+
+    yield {
+      content: '',
+      done: true,
+      model: 'mock-model',
+      toolCalls: [
+        {
+          id: 'call-safe-auto-1',
+          type: 'function',
+          function: {
+            name: 'get_current_time',
+            arguments: JSON.stringify({ timezone: 'Asia/Shanghai' }),
+          },
+        },
+      ],
+    };
   }
 }
 
@@ -291,7 +478,7 @@ describe('AgentRuntime tool plan', () => {
     expect(callIndex).toBeLessThan(finalIndex);
   });
 
-  it('stops before tool execution when plan approval is denied', async () => {
+  it('degrades to advice-only mode when plan approval is denied', async () => {
     const runtime = createRuntime(false);
     const events: Array<unknown> = [];
 
@@ -306,10 +493,10 @@ describe('AgentRuntime tool plan', () => {
     }
 
     const toolCall = events.find((event) => typeof event === 'object' && event !== null && 'type' in event && (event as { type: string }).type === 'tool_call');
-    const cancelChunk = events.find((event) => typeof event === 'object' && event !== null && 'content' in event && String((event as { content: string }).content).includes('拒绝批准本次执行计划'));
+    const adviceChunk = events.find((event) => typeof event === 'object' && event !== null && 'content' in event && String((event as { content: string }).content).includes('不动手的方案'));
 
     expect(toolCall).toBeUndefined();
-    expect(cancelChunk).toBeTruthy();
+    expect(adviceChunk).toBeTruthy();
   });
 
   it('does not keep orphan tool_calls messages after plan rejection', async () => {
@@ -400,6 +587,28 @@ describe('AgentRuntime tool plan', () => {
     expect(finalChunk).toBeTruthy();
   });
 
+  it('degrades to advice-only mode when tool confirmation is denied', async () => {
+    const runtime = createRuntime(true);
+    const events: Array<unknown> = [];
+
+    for await (const event of runtime.chat(
+      'sess-deny-tool',
+      '请保存到文件',
+      undefined,
+      'owner-1',
+      async (request) => request.kind === 'confirm' ? ({ allow: false, scope: 'once' }) : ({ allow: true, scope: 'once' }),
+    )) {
+      events.push(event);
+    }
+
+    const toolCall = events.find((event): event is ToolCallEvent => typeof event === 'object' && event !== null && 'type' in event && (event as { type: string }).type === 'tool_call');
+    const adviceChunk = events.find((event): event is ChatChunk => typeof event === 'object' && event !== null && 'content' in event && (event as ChatChunk).content.includes('不动手的方案'));
+
+    expect(toolCall?.success).toBe(false);
+    expect(toolCall?.result).toContain('用户拒绝执行工具');
+    expect(adviceChunk).toBeTruthy();
+  });
+
   it('persists tool plan and plan approval result into conversation history', async () => {
     const { runtime, savedMessages } = createRuntimeWithStore(true);
 
@@ -442,5 +651,515 @@ describe('AgentRuntime tool plan', () => {
       channel: 'dingtalk',
       senderId: 'staff-001',
     });
+  });
+
+  it('skips execute_plan for safe_auto read-only tools even without persisted grants', async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      definition: {
+        name: 'get_current_time',
+        description: 'mock time tool',
+        parameters: { type: 'object', properties: {} },
+      },
+      permission: 'public',
+      confirmRequired: false,
+      planPolicy: 'safe_auto',
+      execute: async () => ({ success: true, content: '当前时间（Asia/Shanghai）：2026/03/17 星期二 17:30:00' }),
+    } as Tool);
+
+    const runtime = new AgentRuntime({
+      router: new SafeAutoRouter() as never,
+      systemPrompt: 'test',
+      maxTokens: 1024,
+      toolRegistry: registry,
+      ownerIds: ['owner-1'],
+    });
+
+    const requests: string[] = [];
+    const events: Array<unknown> = [];
+    for await (const event of runtime.chat(
+      'sess-safe-auto',
+      '现在几点',
+      undefined,
+      'owner-1',
+      async (request) => {
+        requests.push(request.kind || 'unknown');
+        return { allow: true, scope: 'once' };
+      },
+      'webchat',
+    )) {
+      events.push(event);
+    }
+
+    const toolCall = events.find((event): event is ToolCallEvent =>
+      typeof event === 'object' && event !== null && 'type' in event && (event as { type: string }).type === 'tool_call');
+    expect(toolCall?.name).toBe('get_current_time');
+    expect(requests).toEqual([]);
+  });
+
+  it('reuses persistent grants across runtime restarts for the same principal', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'crabcrush-runtime-'));
+    const dbPath = join(tempDir, 'runtime.db');
+    const store = new ConversationStore(dbPath);
+    const createRuntime = () => {
+      const registry = new ToolRegistry();
+      registry.register({
+        definition: {
+          name: 'secure_action',
+          description: 'mock secure tool',
+          parameters: { type: 'object', properties: {} },
+        },
+        permission: 'owner',
+        confirmRequired: true,
+        buildConfirmRequest: () => ({
+          grantKey: 'web:example.com',
+          preview: {
+            title: '访问外部网页',
+            summary: '将访问 example.com',
+            riskLevel: 'medium',
+            targets: ['example.com'],
+          },
+        }),
+        execute: async () => ({ success: true, content: 'secure ok' }),
+      } as Tool);
+
+      return new AgentRuntime({
+        router: new PersistentGrantRouter() as never,
+        systemPrompt: 'test',
+        maxTokens: 1024,
+        toolRegistry: registry,
+        ownerIds: ['owner-1'],
+        store,
+      });
+    };
+
+    try {
+      const firstRuntime = createRuntime();
+      const firstRequests: string[] = [];
+      for await (const _event of firstRuntime.chat(
+        'sess-persistent-1',
+        '请执行安全操作',
+        undefined,
+        'owner-1',
+        async (request) => {
+          firstRequests.push(request.kind || 'unknown');
+          return { allow: true, scope: request.kind === 'confirm' ? 'persistent' : 'once' };
+        },
+        'webchat',
+      )) {
+        // consume stream
+      }
+
+      const secondRuntime = createRuntime();
+      const secondRequests: string[] = [];
+      const secondEvents: Array<unknown> = [];
+      for await (const _event of secondRuntime.chat(
+        'sess-persistent-2',
+        '再执行一次安全操作',
+        undefined,
+        'owner-1',
+        async (request) => {
+          secondRequests.push(request.kind || 'unknown');
+          return { allow: true, scope: 'once' };
+        },
+        'webchat',
+      )) {
+        secondEvents.push(_event);
+      }
+
+      expect(firstRequests).toEqual(['plan', 'confirm']);
+      expect(secondRequests).toEqual([]);
+      expect(store.hasActivePermissionGrant('webchat:default', 'web:example.com')).toBe(true);
+      const planEvent = secondEvents.find((event): event is ToolPlanEvent =>
+        typeof event === 'object' && event !== null && 'type' in event && (event as { type: string }).type === 'tool_plan');
+      const toolCall = secondEvents.find((event): event is ToolCallEvent =>
+        typeof event === 'object' && event !== null && 'type' in event && (event as { type: string }).type === 'tool_call');
+      expect(planEvent).toBeTruthy();
+      expect(toolCall?.name).toBe('secure_action');
+    } finally {
+      store.close();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('skips execute_plan for permission-request tools once the grant is already persisted', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'crabcrush-runtime-perm-'));
+    const dbPath = join(tempDir, 'runtime.db');
+    const store = new ConversationStore(dbPath);
+    const createRuntime = () => {
+      const registry = new ToolRegistry();
+      registry.register({
+        definition: {
+          name: 'scan_like',
+          description: 'mock scan tool',
+          parameters: { type: 'object', properties: {} },
+        },
+        permission: 'owner',
+        confirmRequired: false,
+        buildPermissionRequest: (args) => ({
+          action: 'list_files',
+          message: `是否允许扫描该目录？\n${String(args.path || '')}`,
+          params: args,
+          grantKey: `file:list:${String(args.path || '')}`,
+          scopeOptions: ['once', 'session', 'persistent'],
+          defaultScope: 'once',
+          preview: {
+            title: '扫描目录',
+            summary: `将扫描 ${String(args.path || '')}`,
+            riskLevel: 'medium',
+            targets: [String(args.path || '')],
+          },
+        }),
+        execute: async (args, context) => {
+          const grantKey = `file:list:${String(args.path || '')}`;
+          if (!context.hasPermissionGrant?.(grantKey)) {
+            const allowed = await context.requestPermission?.({
+              action: 'list_files',
+              message: `是否允许扫描该目录？\n${String(args.path || '')}`,
+              params: args,
+              grantKey,
+              scopeOptions: ['once', 'session', 'persistent'],
+              defaultScope: 'once',
+              preview: {
+                title: '扫描目录',
+                summary: `将扫描 ${String(args.path || '')}`,
+                riskLevel: 'medium',
+                targets: [String(args.path || '')],
+              },
+            });
+            if (!allowed) return { success: false, content: '用户拒绝执行工具 "scan_like"' };
+          }
+          return { success: true, content: 'scan ok' };
+        },
+      } as Tool);
+
+      return new AgentRuntime({
+        router: new PermissionGrantRouter() as never,
+        systemPrompt: 'test',
+        maxTokens: 1024,
+        toolRegistry: registry,
+        ownerIds: ['owner-1'],
+        store,
+      });
+    };
+
+    try {
+      const firstRuntime = createRuntime();
+      const firstRequests: string[] = [];
+      for await (const _event of firstRuntime.chat(
+        'sess-perm-1',
+        '请扫描这个目录',
+        undefined,
+        'owner-1',
+        async (request) => {
+          firstRequests.push(request.kind || 'unknown');
+          return { allow: true, scope: request.kind === 'permission_request' ? 'persistent' : 'once' };
+        },
+        'webchat',
+      )) {
+        // consume stream
+      }
+
+      const secondRuntime = createRuntime();
+      const secondRequests: string[] = [];
+      for await (const _event of secondRuntime.chat(
+        'sess-perm-2',
+        '再扫描一次这个目录',
+        undefined,
+        'owner-1',
+        async (request) => {
+          secondRequests.push(request.kind || 'unknown');
+          return { allow: true, scope: 'once' };
+        },
+        'webchat',
+      )) {
+        // consume stream
+      }
+
+      expect(firstRequests).toEqual(['plan', 'permission_request']);
+      expect(secondRequests).toEqual([]);
+      expect(store.hasActivePermissionGrant('webchat:default', 'file:list:C:/secured/docs')).toBe(true);
+    } finally {
+      store.close();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('skips execute_plan for multi-step plans when every step is already grant-covered', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'crabcrush-runtime-covered-'));
+    const dbPath = join(tempDir, 'runtime.db');
+    const store = new ConversationStore(dbPath);
+    store.savePermissionGrant({
+      principalKey: 'webchat:default',
+      grantKey: 'web:example.com',
+      scope: 'persistent',
+      resourceType: 'domain',
+      resourceValue: 'example.com',
+      meta: { action: 'secure_fetch' },
+    });
+    store.savePermissionGrant({
+      principalKey: 'webchat:default',
+      grantKey: 'file:write:C:/secured/docs/report.md',
+      scope: 'persistent',
+      resourceType: 'path',
+      resourceValue: 'C:/secured/docs/report.md',
+      meta: { action: 'secure_write' },
+    });
+
+    const registry = new ToolRegistry();
+    registry.register({
+      definition: {
+        name: 'secure_fetch',
+        description: 'mock secured web fetch',
+        parameters: { type: 'object', properties: {} },
+      },
+      permission: 'owner',
+      confirmRequired: true,
+      buildConfirmRequest: () => ({
+        grantKey: 'web:example.com',
+        preview: {
+          title: '访问外部网页',
+          summary: '将访问 example.com',
+          riskLevel: 'medium',
+          targets: ['example.com'],
+        },
+      }),
+      execute: async () => ({ success: true, content: 'fetch ok' }),
+    } as Tool);
+    registry.register({
+      definition: {
+        name: 'secure_write',
+        description: 'mock secured file write',
+        parameters: { type: 'object', properties: {} },
+      },
+      permission: 'owner',
+      confirmRequired: true,
+      buildConfirmRequest: () => ({
+        grantKey: 'file:write:C:/secured/docs/report.md',
+        preview: {
+          title: '写入报告',
+          summary: '将写入报告文件',
+          riskLevel: 'high',
+          targets: ['C:/secured/docs/report.md'],
+        },
+      }),
+      execute: async () => ({ success: true, content: 'write ok' }),
+    } as Tool);
+
+    const runtime = new AgentRuntime({
+      router: new MultiStepCoveredRouter() as never,
+      systemPrompt: 'test',
+      maxTokens: 1024,
+      toolRegistry: registry,
+      ownerIds: ['owner-1'],
+      store,
+    });
+
+    try {
+      const requests: string[] = [];
+      const events: Array<unknown> = [];
+      for await (const event of runtime.chat(
+        'sess-covered',
+        '请继续执行这个已授权的多步任务',
+        undefined,
+        'owner-1',
+        async (request) => {
+          requests.push(request.kind || 'unknown');
+          return { allow: true, scope: 'once' };
+        },
+        'webchat',
+      )) {
+        events.push(event);
+      }
+
+      const toolCalls = events.filter((event): event is ToolCallEvent =>
+        typeof event === 'object' && event !== null && 'type' in event && (event as { type: string }).type === 'tool_call');
+      const planEvent = events.find((event): event is ToolPlanEvent =>
+        typeof event === 'object' && event !== null && 'type' in event && (event as { type: string }).type === 'tool_plan');
+
+      expect(planEvent?.steps).toHaveLength(2);
+      expect(toolCalls.map((event) => event.name)).toEqual(['secure_fetch', 'secure_write']);
+      expect(requests).toEqual([]);
+    } finally {
+      store.close();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not refresh persistent grant lastUsedAt when plan is only evaluated but denied', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'crabcrush-runtime-plan-touch-'));
+    const dbPath = join(tempDir, 'runtime.db');
+    const store = new ConversationStore(dbPath);
+    store.savePermissionGrant({
+      principalKey: 'webchat:default',
+      grantKey: 'web:example.com',
+      scope: 'persistent',
+      resourceType: 'domain',
+      resourceValue: 'example.com',
+      meta: { action: 'secure_fetch' },
+    });
+
+    const registry = new ToolRegistry();
+    registry.register({
+      definition: {
+        name: 'secure_fetch',
+        description: 'mock secured web fetch',
+        parameters: { type: 'object', properties: {} },
+      },
+      permission: 'owner',
+      confirmRequired: true,
+      buildConfirmRequest: () => ({
+        grantKey: 'web:example.com',
+        preview: {
+          title: '访问外部网页',
+          summary: '将访问 example.com',
+          riskLevel: 'medium',
+          targets: ['example.com'],
+        },
+      }),
+      execute: async () => ({ success: true, content: 'fetch ok' }),
+    } as Tool);
+    registry.register({
+      definition: {
+        name: 'secure_write',
+        description: 'mock secured file write',
+        parameters: { type: 'object', properties: {} },
+      },
+      permission: 'owner',
+      confirmRequired: true,
+      buildConfirmRequest: () => ({
+        grantKey: 'file:write:C:/secured/docs/needs-approval.md',
+        preview: {
+          title: '写入报告',
+          summary: '将写入报告文件',
+          riskLevel: 'high',
+          targets: ['C:/secured/docs/needs-approval.md'],
+        },
+      }),
+      execute: async () => ({ success: true, content: 'write ok' }),
+    } as Tool);
+
+    const runtime = new AgentRuntime({
+      router: new MixedCoverageRouter() as never,
+      systemPrompt: 'test',
+      maxTokens: 1024,
+      toolRegistry: registry,
+      ownerIds: ['owner-1'],
+      store,
+    });
+
+    try {
+      const before = store.listPermissionGrants('webchat:default')[0]?.lastUsedAt ?? 0;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      for await (const _event of runtime.chat(
+        'sess-mixed-plan',
+        '先检查网页再写入文件',
+        undefined,
+        'owner-1',
+        async (request) => request.kind === 'plan' ? ({ allow: false, scope: 'once' }) : ({ allow: true, scope: 'once' }),
+        'webchat',
+      )) {
+        // consume stream
+      }
+
+      const after = store.listPermissionGrants('webchat:default')[0]?.lastUsedAt ?? 0;
+      expect(after).toBe(before);
+    } finally {
+      store.close();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('revokes in-memory grants only for the matching principal', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'crabcrush-runtime-revoke-'));
+    const dbPath = join(tempDir, 'runtime.db');
+    const store = new ConversationStore(dbPath);
+    const registry = new ToolRegistry();
+    registry.register({
+      definition: {
+        name: 'secure_action',
+        description: 'mock secure tool',
+        parameters: { type: 'object', properties: {} },
+      },
+      permission: 'owner',
+      confirmRequired: true,
+      buildConfirmRequest: () => ({
+        grantKey: 'web:example.com',
+        preview: {
+          title: '访问外部网页',
+          summary: '将访问 example.com',
+          riskLevel: 'medium',
+          targets: ['example.com'],
+        },
+      }),
+      execute: async () => ({ success: true, content: 'secure ok' }),
+    } as Tool);
+
+    const runtime = new AgentRuntime({
+      router: new PerRequestSecureRouter() as never,
+      systemPrompt: 'test',
+      maxTokens: 1024,
+      toolRegistry: registry,
+      ownerIds: ['staff-a', 'staff-b'],
+      store,
+    });
+
+    try {
+      const firstRequests: string[] = [];
+      for await (const _event of runtime.chat(
+        'sess-a',
+        '请执行安全操作',
+        undefined,
+        'staff-a',
+        async (request) => {
+          firstRequests.push(request.kind || 'unknown');
+          return { allow: true, scope: request.kind === 'confirm' ? 'persistent' : 'once' };
+        },
+        'dingtalk',
+      )) {
+        // consume stream
+      }
+
+      const secondRequests: string[] = [];
+      for await (const _event of runtime.chat(
+        'sess-b',
+        '请执行安全操作',
+        undefined,
+        'staff-b',
+        async (request) => {
+          secondRequests.push(request.kind || 'unknown');
+          return { allow: true, scope: request.kind === 'confirm' ? 'session' : 'once' };
+        },
+        'dingtalk',
+      )) {
+        // consume stream
+      }
+
+      expect(runtime.revokePermissionGrant('web:example.com', 'dingtalk', 'staff-a')).toBe(true);
+      expect(store.hasActivePermissionGrant('dingtalk:staff-a', 'web:example.com')).toBe(false);
+
+      const thirdRequests: string[] = [];
+      for await (const _event of runtime.chat(
+        'sess-b',
+        '再执行一次安全操作',
+        undefined,
+        'staff-b',
+        async (request) => {
+          thirdRequests.push(request.kind || 'unknown');
+          return { allow: true, scope: 'once' };
+        },
+        'dingtalk',
+      )) {
+        // consume stream
+      }
+
+      expect(firstRequests).toEqual(['plan', 'confirm']);
+      expect(secondRequests).toEqual(['plan', 'confirm']);
+      expect(thirdRequests).toEqual([]);
+    } finally {
+      store.close();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });

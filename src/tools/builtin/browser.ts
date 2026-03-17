@@ -9,7 +9,7 @@
  */
 
 import { chromium } from 'playwright';
-import type { Tool, ToolContext, ToolResult } from '../types.js';
+import type { PermissionRequest, Tool, ToolContext, ToolResult } from '../types.js';
 
 const PAGE_LOAD_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_CHARS = 8000;
@@ -21,6 +21,30 @@ function isLoopbackHost(hostname: string): boolean {
 
 function getBrowseGrantKey(url: URL): string {
   return `web:${url.hostname.toLowerCase()}`;
+}
+
+function buildBrowsePermissionRequest(url: string): PermissionRequest | null {
+  if (!url || typeof url !== 'string') return null;
+  try {
+    const parsed = new URL(url);
+    if (isLoopbackHost(parsed.hostname)) return null;
+    return {
+      action: 'browse_url',
+      message: `是否允许访问该 URL？\n${url}`,
+      params: { url },
+      grantKey: getBrowseGrantKey(parsed),
+      scopeOptions: ['once', 'session', 'persistent'],
+      defaultScope: 'once',
+      preview: {
+        title: '访问外部网页',
+        summary: `将启动浏览器并访问域名 ${parsed.hostname}。`,
+        riskLevel: 'medium' as const,
+        targets: [parsed.hostname, url],
+      },
+    };
+  } catch {
+    return null;
+  }
 }
 
 export const browseUrlTool: Tool = {
@@ -45,6 +69,9 @@ export const browseUrlTool: Tool = {
   },
   permission: 'owner',
   confirmRequired: false,
+  buildPermissionRequest(args: Record<string, unknown>) {
+    return buildBrowsePermissionRequest(args.url as string);
+  },
 
   async execute(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {
     const url = args.url as string;
@@ -62,24 +89,17 @@ export const browseUrlTool: Tool = {
     try {
       const parsed = new URL(url);
       if (!isLoopbackHost(parsed.hostname)) {
-        const grantKey = getBrowseGrantKey(parsed);
+        const permissionRequest = buildBrowsePermissionRequest(url);
+        const grantKey = permissionRequest?.grantKey ?? getBrowseGrantKey(parsed);
         if (!context.hasPermissionGrant?.(grantKey)) {
           if (!context.requestPermission) {
             return { success: false, content: '访问外部网页需要通道支持权限确认。' };
           }
-          const allowed = await context.requestPermission({
+          const allowed = await context.requestPermission(permissionRequest ?? {
             action: 'browse_url',
             message: `是否允许访问该 URL？\n${url}`,
             params: { url },
             grantKey,
-            scopeOptions: ['once', 'session'],
-            defaultScope: 'once',
-            preview: {
-              title: '访问外部网页',
-              summary: `将启动浏览器并访问域名 ${parsed.hostname}。`,
-              riskLevel: 'medium',
-              targets: [parsed.hostname, url],
-            },
           });
           if (!allowed) return { success: false, content: '用户拒绝执行工具 "browse_url"' };
         }

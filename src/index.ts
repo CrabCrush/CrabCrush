@@ -83,7 +83,35 @@ program
       toolRegistry.register(tool);
     }
 
-    const auditLogger = createAuditLogger();
+    const auditHandle = createAuditLogger();
+    const auditLogger = (event: { type: string; [key: string]: unknown }) => {
+      auditHandle.log(event);
+      const conversationId = typeof event.conversationId === 'string'
+        ? event.conversationId
+        : typeof event.sessionId === 'string'
+          ? event.sessionId
+          : '';
+      if (!conversationId) return;
+      try {
+        store.saveAuditEvent({
+          conversationId,
+          principalKey: typeof event.principalKey === 'string' ? event.principalKey : '',
+          eventType: event.type,
+          operationId: typeof event.operationId === 'string' ? event.operationId : undefined,
+          toolName: typeof event.toolName === 'string'
+            ? event.toolName
+            : typeof event.name === 'string'
+              ? event.name
+              : undefined,
+          grantKey: typeof event.grantKey === 'string' ? event.grantKey : undefined,
+          allowed: typeof event.allowed === 'boolean' ? event.allowed : undefined,
+          scope: typeof event.scope === 'string' ? event.scope : undefined,
+          payload: event,
+        });
+      } catch (err) {
+        console.error('[audit] failed to persist audit event:', err);
+      }
+    };
 
     // 初始化 Agent（带持久化 + 滑动窗口 + 工具调用 + 工作区人格化）
     // fileBase 必须与文件工具一致，确保 write_file 写入 workspace/ 与工作区读取路径相同，跨会话共享人格
@@ -166,8 +194,10 @@ program
       }
       // 关闭数据库
       store.close();
-      // 再停 Gateway
+      // 再停 Gateway（含 clearInterval rateLimitCleanup）
       await app.close();
+      // 最后 flush 审计日志，确保缓冲内容全部落盘
+      await auditHandle.close();
       console.log('🦀 已停止。再见！');
       process.exit(0);
     };

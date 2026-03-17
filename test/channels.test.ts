@@ -45,6 +45,14 @@ describe('DingTalkAdapter', () => {
       id: 'confirm-456',
     });
   });
+
+  it('parses persistent confirm replies with explicit id', () => {
+    expect(parseDingTalkConfirmReply('允许 永久 confirm-789')).toEqual({
+      action: '允许',
+      scope: 'persistent',
+      id: 'confirm-789',
+    });
+  });
 });
 
 describe('Config channels schema', () => {

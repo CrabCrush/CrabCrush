@@ -7,34 +7,71 @@
 ## [未发布]
 ### 2026-03-07
 
-#### feat: plan approval + scoped permissions + safer execution flow
+#### feat: 持久授权与审计回放（Phase 2a 收口）
 
-- Add plan-level approval before tool execution, with preview metadata persisted into conversation history and rendered in WebChat
-- Extend confirm/request permission flow to support `once` vs `session` scopes, execution previews, grant reuse, and richer audit metadata
-- `search_web`: require runtime permission confirmation before external network access, aligning with `browse_url`
-- Persist real conversation channel/sender metadata when creating sessions, fixing non-WebChat history attribution
-- Strengthen runtime file-safety behavior: when a request depends on file state, retry with explicit tool-use enforcement instead of accepting a plain-text guess
-- Fix DingTalk confirmation parsing to correctly support `允许 <id>` / `拒绝 <id>` / `允许 本会话 <id>`
-- Add regression tests for tool plans, DingTalk confirm parsing, search permission gating, and session metadata persistence
+- 新增 `persistent` 授权范围，补齐 `once / session / persistent` 三层授权链路
+- 新增 SQLite 结构化存储：
+  - `permission_grants`：保存可复用的持久授权记录
+  - `audit_events`：保存可查询、可回放的计划/确认/执行事件流
+- 明确授权主体建模规则：
+  - `webchat` 统一视为一个主体，即 `webchat:default`
+  - `dingtalk` 等支持群聊/多用户的渠道，按 `渠道 + 用户` 建模，例如 `dingtalk:staff-001`
+- 持久授权支持按资源复用：
+  - 文件/目录类授权按路径范围复用
+  - 网页访问/搜索类授权按域名范围复用
+- 运行时从“仅内存 session grant”升级为“双层授权模型”：
+  - `session` 仍只在当前会话有效
+  - `persistent` 会写入 SQLite，并在后续会话或重启后继续复用
+- 为 plan / permission / confirm / tool execution 链路补充统一 `operationId`，方便把一次执行串成完整审计轨迹
+- `audit.log` 继续保留为运维/debug 日志；产品侧查询与回放改走 SQLite `audit_events`
+- WebChat 新增最小版“审计回放”时间线，可按会话查看：
+  - 执行计划
+  - 批准/拒绝结果
+  - 权限确认
+  - 工具执行与结果
+- WebChat 确认弹窗新增“永久允许”选项；钉钉支持文本确认 `允许 永久 <id>`
+- 优化计划确认体验：当本轮是“单步操作”且对应资源已被 `session` 或 `persistent` 授权覆盖时，跳过重复的 `execute_plan` 确认，避免已授权操作反复弹窗
+- 修复持久授权 `lastUsedAt` 的刷新时机：仅在真实执行复用授权时更新，不再把“计划阶段的授权覆盖判断”误记为一次使用
+- 新增持久授权恢复、审计查询、WebChat 回放、钉钉永久授权解析等测试用例
+- 全量测试与构建通过
+- 未修改计划文件，仅落地代码、测试与变更记录
 
-#### refactor: centralize intent heuristics and add integration coverage
+#### feat: 计划审批、作用域授权与更安全的执行流
 
-- Extract file-related intent heuristics into `src/tools/intent.ts` so runtime enforcement and `write_file` guardrails share one implementation
-- Expand the heuristic guardrails to cover common English file/write expressions in addition to Chinese
-- Add Chinese comments explaining the current heuristic trade-off and the longer-term direction of moving authority toward plan approval, previews, and confirms
-- Add WebSocket integration tests for the full WebChat confirm flow and session-scoped confirm reuse
-- Add intent-focused tests for English file checks and English write-file requests
+- 在工具真正执行前增加计划级审批，并把预览元数据持久化到对话历史中，供 WebChat 展示
+- 扩展 confirm / request permission 流程，支持 `once` 与 `session` 作用域、执行预览、授权复用和更丰富的审计元数据
+- `search_web`：外部联网搜索前必须经过运行时权限确认，与 `browse_url` 的安全策略保持一致
+- 创建会话时持久化真实的 `channel / sender` 元数据，修复非 WebChat 渠道的历史归属问题
+- 强化运行时文件安全：当请求依赖文件真实状态时，优先要求模型显式调用工具核实，而不是接受纯文本猜测
+- 修复钉钉确认解析，正确支持 `允许 <id>` / `拒绝 <id>` / `允许 本会话 <id>`
+- 增加工具计划、钉钉确认解析、联网搜索权限门控、会话元数据持久化等回归测试
+
+#### refactor: 收敛意图启发式并补充集成覆盖
+
+- 将文件相关意图启发式提取到 `src/tools/intent.ts`，让运行时约束和 `write_file` 护栏共享同一套实现
+- 在中文之外补充常见英文文件/写入表达式的启发式匹配，减少英文请求下的误判
+- 增加中文注释，明确当前启发式只是过渡方案，长期方向仍是把真实授权收敛到计划审批、执行预览和确认机制
+- 增加 WebSocket 集成测试，覆盖完整的 WebChat 确认流与会话级授权复用
+- 增加面向意图识别的测试，覆盖英文文件检查与英文写文件请求
+
+#### fix: 拒绝后降级与审计/存储清理加固
+
+- 当用户拒绝计划或工具确认时，自动降级为“只给方案、不动手”的回复模式，而不是直接中断
+- 加固 `audit/logger.ts`：支持可关闭的 logger handle、初始化/运行期写失败时回退到 `stderr`，并补充 flush / fallback 测试
+- 开启 SQLite 外键约束，确保 `messages.conversation_id` 在运行时真正受保护
+- 在 Fastify 关闭时清理 Gateway 的限流定时器，避免长期运行或多次启动/停止后残留
+- 进程退出前主动 flush 审计日志，避免缓冲内容丢失
 
 ### 2026-03-05
 
-#### feat: runtime permission requests (request-level) + safer reads
+#### feat: 运行时权限请求（请求级）与更安全的读取
 
-- Add request-level permission prompts (`permission_request`) alongside tool-level `confirmRequired`
-- `browse_url`: prompt before accessing non-loopback URLs (works even when Chromium is already installed)
-- `read_file` / `list_files`: allow paths under `tools.fileBase` by default; require permission prompt for absolute paths outside base
-- Include `kind/message` metadata in confirm events and show it in WebChat/DingTalk confirmations
-- Fix `file` tool source to remove stray literal `\\n` characters that broke TypeScript parsing
-- Update `read_file` absolute-path test to reflect permission gating (requires channel/runtime support)
+- 在工具级 `confirmRequired` 之外，新增请求级权限提示 `permission_request`
+- `browse_url`：访问非 loopback URL 前先询问权限，即使 Chromium 已安装也一样生效
+- `read_file` / `list_files`：默认允许读取 `tools.fileBase` 下路径；对 base 之外的绝对路径要求权限确认
+- 在确认事件中加入 `kind / message` 元数据，并在 WebChat / 钉钉确认界面中展示
+- 修复 `file` 工具源码中的字面量 `\\n` 残留，避免 TypeScript 解析异常
+- 更新 `read_file` 绝对路径测试，使其与新的权限门控行为保持一致
 
 ### 2026-02-26
 

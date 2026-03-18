@@ -60,6 +60,8 @@ export interface ToolConfirmRequest {
   senderId: string;
   /** 结构化审计/回放用操作 ID */
   operationId?: string;
+  /** 当前确认对应的步骤序号（从 1 开始） */
+  stepIndex?: number;
   /** confirmRequired(工具级) 或 permission_request(请求级) */
   kind?: 'confirm' | 'permission_request' | 'plan';
   /** 可选说明文案 */
@@ -111,6 +113,8 @@ export interface ToolContext {
   sessionId: string;
   /** 当前执行链操作 ID，用于串起 plan / confirm / tool_result */
   operationId?: string;
+  /** 当前工具所在步骤序号（从 1 开始） */
+  stepIndex?: number;
   /** 当前用户消息（可选，用于安全策略） */
   userMessage?: string;
   /** 需要确认时的回调（由通道层提供） */

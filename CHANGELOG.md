@@ -5,6 +5,17 @@
 ---
 
 ## [未发布]
+### 2026-03-17
+
+#### feat: WebChat 当前任务面板 V1
+
+- 为 `tool_plan / confirm / tool_call` 事件补齐 `operationId` 与 `stepIndex`，把一次执行的计划、确认与步骤结果串成同一条任务链路
+- WebSocket 下发的计划、确认、工具执行事件新增任务级元数据，便于 Web 控制面按步骤聚合展示
+- WebChat 新增“当前任务”面板，显示任务标题、状态、步骤进度、风险摘要、授权覆盖与执行结果
+- 切换会话、新建会话、加载历史、确认、执行完成等关键路径都会同步刷新任务视图，避免残留旧任务状态
+- 为运行时与 Gateway 增加 `operationId / stepIndex` 回归断言，覆盖单步和多步任务场景
+- 全量测试与构建通过
+
 ### 2026-03-07
 
 #### feat: 持久授权与审计回放（Phase 2a 收口）
@@ -463,6 +474,9 @@ WebChat 和核心引擎的完善，从"能跑"到"好用"。
 - CLI 入口：Commander.js
 - TypeScript strict mode 配置
 - GPL-3.0 License
+
+
+
 
 
 

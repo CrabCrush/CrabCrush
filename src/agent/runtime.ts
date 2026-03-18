@@ -60,6 +60,8 @@ export interface AgentRuntimeOptions {
 /** 工具调用事件 — 通过 yield 返回给调用方，用于 UI 展示 */
 export interface ToolCallEvent {
   type: 'tool_call';
+  operationId?: string;
+  stepIndex?: number;
   name: string;
   args: Record<string, unknown>;
   result: string;
@@ -67,6 +69,7 @@ export interface ToolCallEvent {
 }
 
 export interface ToolPlanStep {
+  index: number;
   name: string;
   args: Record<string, unknown>;
   preview?: ToolExecutionPreview;
@@ -260,6 +263,7 @@ export class AgentRuntime {
       // 计划阶段只判断“是否已被授权覆盖”，不应把它计作一次真实使用。
       const grantCovered = grantKey ? Boolean(toolContext.hasPermissionGrant?.(grantKey, { touch: false })) : false;
       return {
+        index: index + 1,
         name: tc.function.name,
         args,
         preview,
@@ -503,12 +507,13 @@ export class AgentRuntime {
 
       // 逐个执行工具
       const operationId = createOperationId();
-      const requestPermission = confirmToolCall
+      const createRequestPermission = (stepIndex: number) => confirmToolCall
         ? async (req: PermissionRequest) => {
           if (req.grantKey && this.hasPermissionGrant(sessionId, principalKey, req.grantKey)) {
             emitAudit({
               type: 'permission_request_reused',
               operationId,
+              stepIndex,
               action: req.action,
               grantKey: req.grantKey,
             });
@@ -521,6 +526,7 @@ export class AgentRuntime {
             sessionId,
             senderId: senderId ?? sessionId,
             operationId,
+            stepIndex,
             kind: 'permission_request',
             message: req.message,
             preview: req.preview,
@@ -532,6 +538,7 @@ export class AgentRuntime {
           emitAudit({
             type: 'permission_request_result',
             operationId,
+            stepIndex,
             action: req.action,
             allowed: decision.allow,
             scope: decision.scope,
@@ -551,7 +558,7 @@ export class AgentRuntime {
         }
         : undefined;
 
-      const toolContext: ToolContext = {
+      const baseToolContext: ToolContext = {
         channel,
         senderId: senderId ?? sessionId,
         principalKey,
@@ -559,7 +566,7 @@ export class AgentRuntime {
         sessionId,
         operationId,
         confirm: confirmToolCall,
-        requestPermission,
+        requestPermission: undefined,
         hasPermissionGrant: (grantKey: string, options?: { touch?: boolean }) =>
           this.hasPermissionGrant(sessionId, principalKey, grantKey, options),
         rememberPermissionGrant: (
@@ -580,7 +587,7 @@ export class AgentRuntime {
         }
       }
 
-      const planSteps = this.buildToolPlan(toolCalls, parsedArgsList, toolContext);
+      const planSteps = this.buildToolPlan(toolCalls, parsedArgsList, baseToolContext);
       const planSummary = planSteps.length === 1 ? '准备执行 1 个步骤' : `准备执行 ${planSteps.length} 个步骤`;
       emitAudit({ type: 'tool_plan', operationId, round: toolRound, steps: planSteps.map((s) => s.name) });
       this.store?.saveMessage(
@@ -596,7 +603,7 @@ export class AgentRuntime {
           name: 'execute_plan',
           args: {
             round: toolRound,
-            steps: planSteps.map((step, index) => ({ index: index + 1, name: step.name, args: step.args })),
+            steps: planSteps.map((step) => ({ index: step.index, name: step.name, args: step.args })),
           },
           sessionId,
           senderId: senderId ?? sessionId,
@@ -654,8 +661,14 @@ export class AgentRuntime {
       for (let index = 0; index < toolCalls.length; index++) {
         const tc = toolCalls[index];
         const args = parsedArgsList[index] ?? {};
+        const stepIndex = index + 1;
+        const toolContext: ToolContext = {
+          ...baseToolContext,
+          stepIndex,
+          requestPermission: createRequestPermission(stepIndex),
+        };
 
-        emitAudit({ type: 'tool_call', operationId, name: tc.function.name, toolName: tc.function.name });
+        emitAudit({ type: 'tool_call', operationId, stepIndex, name: tc.function.name, toolName: tc.function.name });
 
         const result = this.toolRegistry
           ? await this.toolRegistry.execute(tc.function.name, args, toolContext)
@@ -664,6 +677,7 @@ export class AgentRuntime {
         emitAudit({
           type: 'tool_result',
           operationId,
+          stepIndex,
           name: tc.function.name,
           toolName: tc.function.name,
           success: result.success,
@@ -681,7 +695,7 @@ export class AgentRuntime {
           console.log(`  ← ${tc.function.name}: ${result.success ? '✓' : '✗'} ${result.content.slice(0, 100)}`);
         }
 
-        yield { type: 'tool_call', name: tc.function.name, args, result: result.content, success: result.success };
+        yield { type: 'tool_call', operationId, stepIndex, name: tc.function.name, args, result: result.content, success: result.success };
         accumulatedToolCalls.push({ name: tc.function.name, args, result: result.content, success: result.success });
 
         const toolMsg: ChatMessage = { role: 'tool', content: result.content, tool_call_id: tc.id };

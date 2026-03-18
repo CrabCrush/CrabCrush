@@ -365,6 +365,7 @@ describe('Gateway WebSocket confirm flow', () => {
       const confirmEvents = messages.filter((msg) => msg.type === 'confirm');
       const toolEvent = messages.find((msg) => msg.type === 'tool_call');
       const finalChunk = messages.find((msg) => msg.type === 'chunk' && msg.content === '已安全完成操作');
+      const operationId = String(planEvent?.operationId || '');
 
       expect(types.indexOf('session')).toBeGreaterThanOrEqual(0);
       expect(types.indexOf('tool_plan')).toBeGreaterThan(types.indexOf('session'));
@@ -372,7 +373,18 @@ describe('Gateway WebSocket confirm flow', () => {
       expect(confirmEvents[0]?.kind).toBe('plan');
       expect(confirmEvents[1]?.kind).toBe('confirm');
       expect(planEvent?.summary).toBe('准备执行 1 个步骤');
-      expect(toolEvent).toMatchObject({ type: 'tool_call', name: 'secure_action', success: true });
+      expect(operationId).not.toBe('');
+      expect(confirmEvents[0]?.operationId).toBe(operationId);
+      expect(confirmEvents[0]?.stepIndex).toBeUndefined();
+      expect(confirmEvents[1]?.operationId).toBe(operationId);
+      expect(confirmEvents[1]?.stepIndex).toBe(1);
+      expect(toolEvent).toMatchObject({
+        type: 'tool_call',
+        operationId,
+        stepIndex: 1,
+        name: 'secure_action',
+        success: true,
+      });
       expect(finalChunk).toBeTruthy();
       expect(types.indexOf('tool_call')).toBeGreaterThan(types.indexOf('confirm'));
       expect(types.at(-1)).toBe('done');
@@ -661,3 +673,4 @@ describe('Gateway WebSocket confirm flow', () => {
     }
   });
 });
+

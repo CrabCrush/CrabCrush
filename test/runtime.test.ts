@@ -465,9 +465,13 @@ describe('AgentRuntime tool plan', () => {
     const finalChunk = events.find((event): event is ChatChunk => typeof event === 'object' && event !== null && 'content' in event && (event as ChatChunk).content === '已完成');
 
     expect(plan).toBeTruthy();
+    expect(plan?.operationId).toEqual(expect.any(String));
     expect(plan?.steps).toHaveLength(1);
+    expect(plan?.steps[0]?.index).toBe(1);
     expect(plan?.steps[0].preview?.title).toBe('写入文件');
     expect(toolCall).toBeTruthy();
+    expect(toolCall?.operationId).toBe(plan?.operationId);
+    expect(toolCall?.stepIndex).toBe(1);
     expect(toolCall?.name).toBe('write_like');
     expect(finalChunk).toBeTruthy();
 
@@ -978,7 +982,10 @@ describe('AgentRuntime tool plan', () => {
         typeof event === 'object' && event !== null && 'type' in event && (event as { type: string }).type === 'tool_plan');
 
       expect(planEvent?.steps).toHaveLength(2);
+      expect(planEvent?.steps.map((step) => step.index)).toEqual([1, 2]);
       expect(toolCalls.map((event) => event.name)).toEqual(['secure_fetch', 'secure_write']);
+      expect(toolCalls.map((event) => event.stepIndex)).toEqual([1, 2]);
+      expect(toolCalls.every((event) => event.operationId === planEvent?.operationId)).toBe(true);
       expect(requests).toEqual([]);
     } finally {
       store.close();
@@ -1163,3 +1170,4 @@ describe('AgentRuntime tool plan', () => {
     }
   });
 });
+

@@ -96,6 +96,7 @@ export class ToolRegistry {
         senderId: context.senderId,
         kind: 'confirm',
         operationId: context.operationId,
+        stepIndex: context.stepIndex,
         defaultScope: 'once',
         ...tool.buildConfirmRequest?.(args, context),
       };

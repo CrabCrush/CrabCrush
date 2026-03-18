@@ -111,6 +111,7 @@ export async function startGateway(options: GatewayOptions = {}) {
         timeout: NodeJS.Timeout;
         name: string;
         operationId?: string;
+        stepIndex?: number;
       }>();
 
       const requestConfirm: ToolConfirmHandler = async (request) => {
@@ -133,7 +134,7 @@ export async function startGateway(options: GatewayOptions = {}) {
             resolve({ allow: false, scope: request.defaultScope });
           }, timeoutMs);
 
-          pendingConfirms.set(id, { resolve, timeout, name: request.name, operationId: request.operationId });
+          pendingConfirms.set(id, { resolve, timeout, name: request.name, operationId: request.operationId, stepIndex: request.stepIndex });
           if (socket.readyState === 1) {
             socket.send(JSON.stringify({
               type: 'confirm',
@@ -146,6 +147,8 @@ export async function startGateway(options: GatewayOptions = {}) {
               scopeOptions: request.scopeOptions,
               defaultScope: request.defaultScope,
               grantKey: request.grantKey,
+              operationId: request.operationId,
+              stepIndex: request.stepIndex,
               timeoutMs,
             }));
           }
@@ -193,6 +196,7 @@ export async function startGateway(options: GatewayOptions = {}) {
                 allowed: decision.allow,
                 scope: decision.scope,
                 operationId: pending.operationId,
+                stepIndex: pending.stepIndex,
               });
               pending.resolve(decision);
             }
@@ -299,6 +303,7 @@ export async function startGateway(options: GatewayOptions = {}) {
                   const planEvent = event as ToolPlanEvent;
                   socket.send(JSON.stringify({
                     type: 'tool_plan',
+                    operationId: planEvent.operationId,
                     round: planEvent.round,
                     summary: planEvent.summary,
                     steps: planEvent.steps,
@@ -311,6 +316,8 @@ export async function startGateway(options: GatewayOptions = {}) {
                   const toolEvent = event as ToolCallEvent;
                   socket.send(JSON.stringify({
                     type: 'tool_call',
+                    operationId: toolEvent.operationId,
+                    stepIndex: toolEvent.stepIndex,
                     name: toolEvent.name,
                     args: toolEvent.args,
                     result: toolEvent.result,

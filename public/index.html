@@ -476,6 +476,10 @@
       <p>做你的虾兵蟹将 —— 随时为你服务<br>输入消息开始对话吧</p>
     </div>
   </div>
+  <details id="task-details" open style="margin:0 1rem 0.75rem;padding:0.75rem 0.9rem;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:10px">
+    <summary style="cursor:pointer;font-size:0.9rem;color:var(--text-muted)">当前任务</summary>
+    <div id="task-panel" style="margin-top:0.75rem;font-size:0.82rem;color:var(--text-muted)">当前暂无进行中的任务。</div>
+  </details>
   <details id="audit-details" style="margin:0 1rem 0.75rem;padding:0.75rem 0.9rem;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:10px">
     <summary style="cursor:pointer;font-size:0.9rem;color:var(--text-muted)">审计回放</summary>
     <div id="audit-timeline" style="margin-top:0.75rem;font-size:0.82rem;color:var(--text-muted)">当前会话暂无可回放的执行审计。</div>
@@ -651,6 +655,7 @@
       const url = new URL(location.href);
       url.searchParams.set('session', sessionId);
       history.replaceState(null, '', url.toString());
+      clearTaskStates('已切换会话，等待新的任务执行。');
       if (ws && ws.readyState === 1) {
         ws.send(JSON.stringify({ type: 'loadHistory', sessionId, limit: 100 }));
         requestAuditEvents();
@@ -666,6 +671,7 @@
       url.searchParams.delete('session');
       history.replaceState(null, '', url.toString());
       messagesEl.innerHTML = '<div class="welcome"><div class="emoji">🦀</div><h2>你好！我是 CrabCrush</h2><p>做你的虾兵蟹将 —— 随时为你服务<br>输入消息开始对话吧</p></div>';
+      clearTaskStates('当前暂无进行中的任务。');
       if (auditTimeline) auditTimeline.innerHTML = '<div style="color:var(--text-muted)">当前会话暂无可回放的执行审计。</div>';
       if (auditDetails) auditDetails.open = false;
       if (grantsPanel) grantsPanel.innerHTML = '<div style="color:var(--text-muted)">当前暂无持久授权记录。</div>';
@@ -696,6 +702,8 @@
     const confirmPreviewTargets = document.getElementById('confirm-preview-targets');
     const confirmScope = document.getElementById('confirm-scope');
     const confirmScopeLabel = document.getElementById('confirm-scope-label');
+    const taskDetails = document.getElementById('task-details');
+    const taskPanel = document.getElementById('task-panel');
     const auditDetails = document.getElementById('audit-details');
     const auditTimeline = document.getElementById('audit-timeline');
     const grantsDetails = document.getElementById('grants-details');
@@ -717,6 +725,254 @@
 
     const confirmQueue = [];
     let activeConfirm = null;
+    const taskStates = new Map();
+    let currentTaskOperationId = null;
+
+    const taskStatusLabels = {
+      planning: '准备中',
+      waiting_confirm: '等待确认',
+      running: '执行中',
+      completed: '已完成',
+      failed: '执行失败',
+      rejected: '已拒绝',
+      degraded: '已降级',
+    };
+
+    const stepStatusLabels = {
+      pending: '待执行',
+      waiting_confirm: '等待确认',
+      running: '执行中',
+      success: '成功',
+      failed: '失败',
+      rejected: '已拒绝',
+    };
+
+    function getTaskStatusColor(status) {
+      if (status === 'completed') return '#4ade80';
+      if (status === 'running') return '#60a5fa';
+      if (status === 'waiting_confirm') return '#f59e0b';
+      if (status === 'failed' || status === 'rejected' || status === 'degraded') return '#f87171';
+      return '#9ca3af';
+    }
+
+    function getStepStatusColor(status) {
+      if (status === 'success') return '#4ade80';
+      if (status === 'running') return '#60a5fa';
+      if (status === 'waiting_confirm') return '#f59e0b';
+      if (status === 'failed' || status === 'rejected') return '#f87171';
+      return '#9ca3af';
+    }
+
+    function createTaskState(operationId) {
+      return {
+        operationId,
+        round: 0,
+        summary: '',
+        status: 'planning',
+        steps: [],
+        summaryText: '等待模型生成执行计划。',
+      };
+    }
+
+    function ensureTaskState(operationId) {
+      if (!operationId) return null;
+      let task = taskStates.get(operationId);
+      if (!task) {
+        task = createTaskState(operationId);
+        taskStates.set(operationId, task);
+      }
+      currentTaskOperationId = operationId;
+      return task;
+    }
+
+    function clearTaskStates(message = '当前暂无进行中的任务。') {
+      taskStates.clear();
+      currentTaskOperationId = null;
+      if (taskPanel) taskPanel.innerHTML = `<div style="color:var(--text-muted)">${escapeHtml(message)}</div>`;
+      if (taskDetails) taskDetails.open = true;
+    }
+
+    function ensureTaskStep(task, stepIndex, name) {
+      let step = task.steps.find((item) => item.index === stepIndex);
+      if (!step) {
+        step = {
+          index: stepIndex,
+          name: name || `步骤 ${stepIndex}`,
+          title: name || `步骤 ${stepIndex}`,
+          summary: '',
+          riskLevel: '',
+          targets: [],
+          grantCovered: false,
+          status: 'pending',
+          result: '',
+        };
+        task.steps.push(step);
+        task.steps.sort((a, b) => a.index - b.index);
+      }
+      return step;
+    }
+
+    function renderTaskPanel() {
+      if (!taskPanel) return;
+      if (!currentTaskOperationId || !taskStates.has(currentTaskOperationId)) {
+        taskPanel.innerHTML = '<div style="color:var(--text-muted)">当前暂无进行中的任务。</div>';
+        return;
+      }
+      const task = taskStates.get(currentTaskOperationId);
+      const steps = Array.isArray(task.steps) ? task.steps : [];
+      const stepsHtml = steps.length === 0
+        ? '<div style="color:var(--text-muted)">等待计划步骤...</div>'
+        : steps.map((step) => {
+          const targets = Array.isArray(step.targets) && step.targets.length > 0
+            ? `<div style="margin-top:0.2rem;color:var(--text-muted)">目标：${escapeHtml(step.targets.join(' / '))}</div>`
+            : '';
+          const summary = step.summary
+            ? `<div style="margin-top:0.2rem;color:var(--text-muted)">${escapeHtml(step.summary)}</div>`
+            : '';
+          const result = step.result
+            ? `<div style="margin-top:0.3rem;color:var(--text-muted);white-space:pre-wrap">结果：${escapeHtml(step.result)}</div>`
+            : '';
+          const covered = step.grantCovered
+            ? '<span style="margin-left:0.4rem;color:#4ade80">已授权覆盖</span>'
+            : '';
+          const risk = step.riskLevel
+            ? `<span style="margin-left:0.4rem;color:var(--text-muted)">${escapeHtml(step.riskLevel)}</span>`
+            : '';
+          return `
+            <div style="padding:0.55rem 0;border-bottom:1px solid rgba(255,255,255,0.06)">
+              <div style="display:flex;justify-content:space-between;gap:0.8rem;align-items:flex-start">
+                <div>
+                  <strong style="color:var(--text)">${step.index}. ${escapeHtml(step.title || step.name || `步骤 ${step.index}`)}</strong>
+                  ${covered}
+                  ${risk}
+                </div>
+                <span style="font-size:0.76rem;color:${getStepStatusColor(step.status)}">${escapeHtml(stepStatusLabels[step.status] || step.status)}</span>
+              </div>
+              ${summary}
+              ${targets}
+              ${result}
+            </div>
+          `;
+        }).join('');
+      taskPanel.innerHTML = `
+        <div style="display:flex;justify-content:space-between;gap:0.8rem;align-items:center">
+          <strong style="color:var(--text)">${escapeHtml(task.summary || '执行任务')}</strong>
+          <span style="font-size:0.78rem;color:${getTaskStatusColor(task.status)}">${escapeHtml(taskStatusLabels[task.status] || task.status)}</span>
+        </div>
+        <div style="margin-top:0.3rem;color:var(--text-muted)">${escapeHtml(task.summaryText || '等待执行结果...')}</div>
+        <div style="margin-top:0.3rem;color:var(--text-muted)">任务 ID：${escapeHtml(String(task.operationId || ''))}</div>
+        <div style="margin-top:0.6rem">${stepsHtml}</div>
+      `;
+    }
+
+    function applyToolPlanEvent(msg) {
+      const task = ensureTaskState(msg.operationId);
+      if (!task) return;
+      task.round = Number(msg.round || 0);
+      task.summary = msg.summary || '执行任务';
+      task.status = 'planning';
+      task.summaryText = '执行计划已生成，等待下一步。';
+      task.steps = (Array.isArray(msg.steps) ? msg.steps : []).map((step, idx) => ({
+        index: Number(step.index || idx + 1),
+        name: step.name || `步骤 ${idx + 1}`,
+        title: step.preview?.title || step.name || `步骤 ${idx + 1}`,
+        summary: step.preview?.summary || '',
+        riskLevel: step.preview?.riskLevel || '',
+        targets: Array.isArray(step.preview?.targets) ? step.preview.targets : [],
+        grantCovered: Boolean(step.grantCovered),
+        status: 'pending',
+        result: '',
+      }));
+      renderTaskPanel();
+    }
+
+    function markTaskWaitingForConfirm(confirm) {
+      if (!confirm?.operationId) return;
+      const task = ensureTaskState(confirm.operationId);
+      if (!task) return;
+      task.status = 'waiting_confirm';
+      if (confirm.kind === 'plan') {
+        task.summaryText = '等待批准执行计划。';
+      } else if (confirm.stepIndex) {
+        const step = ensureTaskStep(task, Number(confirm.stepIndex), confirm.name);
+        step.status = 'waiting_confirm';
+        task.summaryText = `等待确认第 ${step.index} 步。`;
+      }
+      renderTaskPanel();
+    }
+
+    function applyConfirmDecision(confirm, allow, scope) {
+      if (!confirm?.operationId) return;
+      const task = ensureTaskState(confirm.operationId);
+      if (!task) return;
+      if (confirm.kind === 'plan') {
+        task.status = allow ? 'running' : 'rejected';
+        task.summaryText = allow
+          ? '执行计划已批准，开始执行。'
+          : '已拒绝执行计划，本轮将降级为只给方案。';
+      } else if (confirm.stepIndex) {
+        const step = ensureTaskStep(task, Number(confirm.stepIndex), confirm.name);
+        if (allow) {
+          step.status = 'pending';
+          task.status = 'running';
+          task.summaryText = `已允许第 ${step.index} 步${scope === 'persistent' ? '（永久）' : scope === 'session' ? '（本会话）' : ''}。`;
+        } else {
+          step.status = 'rejected';
+          task.status = 'degraded';
+          step.result = '用户拒绝执行该步骤。';
+          task.summaryText = `已拒绝第 ${step.index} 步，当前任务将降级为只给方案。`;
+        }
+      }
+      renderTaskPanel();
+    }
+
+    function applyToolCallEvent(msg) {
+      const task = ensureTaskState(msg.operationId);
+      if (!task) return;
+      const stepIndex = Number(msg.stepIndex || task.steps.length + 1);
+      const step = ensureTaskStep(task, stepIndex, msg.name);
+      step.result = String(msg.result || '');
+      if (step.title === step.name) step.title = msg.name || step.title;
+      if (msg.success) {
+        step.status = 'success';
+        task.status = 'running';
+        task.summaryText = `已完成第 ${step.index} 步。`;
+      } else {
+        const rejected = typeof msg.result === 'string' && msg.result.includes('用户拒绝执行工具');
+        step.status = rejected ? 'rejected' : 'failed';
+        task.status = rejected ? 'degraded' : 'failed';
+        task.summaryText = rejected
+          ? `第 ${step.index} 步被拒绝，当前任务已降级。`
+          : `第 ${step.index} 步执行失败。`;
+      }
+      renderTaskPanel();
+    }
+
+    function finalizeCurrentTaskView(finalText) {
+      if (!currentTaskOperationId || !taskStates.has(currentTaskOperationId)) return;
+      const task = taskStates.get(currentTaskOperationId);
+      const steps = Array.isArray(task.steps) ? task.steps : [];
+      const successCount = steps.filter((step) => step.status === 'success').length;
+      const failedCount = steps.filter((step) => step.status === 'failed').length;
+      const rejectedCount = steps.filter((step) => step.status === 'rejected').length;
+      if (task.status !== 'rejected' && task.status !== 'degraded') {
+        task.status = failedCount > 0 ? 'failed' : 'completed';
+      }
+      if (task.status === 'completed') {
+        task.summaryText = `执行完成：${successCount}/${steps.length || successCount} 步成功。`;
+      } else if (task.status === 'failed') {
+        task.summaryText = `执行结束：${successCount} 步成功，${failedCount} 步失败。`;
+      } else if (task.status === 'rejected' || task.status === 'degraded') {
+        task.summaryText = rejectedCount > 0
+          ? `任务未完整执行：${rejectedCount} 步被拒绝，已降级为只给方案。`
+          : task.summaryText;
+      }
+      if (typeof finalText === 'string' && finalText.includes('不动手')) {
+        task.status = task.status === 'rejected' ? 'rejected' : 'degraded';
+        task.summaryText = '本轮未继续执行，已切换为只给方案。';
+      }
+      renderTaskPanel();
+    }
 
     function formatAuditTime(ts) {
       if (!ts) return '';
@@ -848,7 +1104,13 @@
       if (activeConfirm || confirmQueue.length === 0) return;
       activeConfirm = confirmQueue.shift();
       if (!activeConfirm) return;
-      if (confirmTitle) confirmTitle.textContent = `需要确认：${activeConfirm.name || ''}`;
+      markTaskWaitingForConfirm(activeConfirm);
+      const stepLabel = activeConfirm.stepIndex ? `第 ${activeConfirm.stepIndex} 步 · ` : '';
+      if (confirmTitle) {
+        confirmTitle.textContent = activeConfirm.kind === 'plan'
+          ? '需要确认：执行计划'
+          : `需要确认：${stepLabel}${activeConfirm.name || ''}`;
+      }
       const defaultDesc = activeConfirm.kind === 'permission_request'
         ? '该操作需要额外权限，请确认是否继续。'
         : activeConfirm.kind === 'plan'
@@ -881,6 +1143,7 @@
 
     function resolveConfirm(allow, scope = 'once') {
       if (!activeConfirm) return;
+      applyConfirmDecision(activeConfirm, Boolean(allow), scope);
       if (ws && ws.readyState === 1) {
         ws.send(JSON.stringify({
           type: 'confirm_result',
@@ -982,6 +1245,7 @@
           const append = (msg.offset || 0) > 0;
           const fragment = renderMessagesToFragment(msg.messages || []);
           if (!append) {
+            clearTaskStates('当前暂无进行中的任务。');
             messagesEl.innerHTML = '';
             welcomeShown = false;
             if (fragment.childNodes.length > 0) {
@@ -1036,10 +1300,22 @@
             messagesEl.appendChild(hint);
           }
         } else if (msg.type === 'confirm') {
-          confirmQueue.push({ id: msg.id, name: msg.name, args: msg.args, kind: msg.kind, message: msg.message, preview: msg.preview, scopeOptions: msg.scopeOptions, defaultScope: msg.defaultScope });
+          confirmQueue.push({
+            id: msg.id,
+            name: msg.name,
+            args: msg.args,
+            kind: msg.kind,
+            message: msg.message,
+            preview: msg.preview,
+            scopeOptions: msg.scopeOptions,
+            defaultScope: msg.defaultScope,
+            operationId: msg.operationId,
+            stepIndex: msg.stepIndex,
+          });
           showNextConfirm();
 
-                } else if (msg.type === 'tool_plan') {
+        } else if (msg.type === 'tool_plan') {
+          applyToolPlanEvent(msg);
           const planEl = document.createElement('div');
           planEl.className = 'tool-plan';
           const steps = Array.isArray(msg.steps) ? msg.steps : [];
@@ -1055,6 +1331,7 @@
           messagesEl.scrollTop = messagesEl.scrollHeight;
 
         } else if (msg.type === 'tool_call') {
+          applyToolCallEvent(msg);
           // 工具调用事件 — 在聊天区域显示调用过程
           const toolEl = document.createElement('div');
           toolEl.className = 'tool-call';
@@ -1087,6 +1364,7 @@
           }
           requestAuditEvents();
           requestPermissionGrants();
+          finalizeCurrentTaskView(rawContent);
           finishStreaming();
 
         } else if (msg.type === 'error') {
@@ -1271,4 +1549,5 @@
   </script>
 </body>
 </html>
+
 

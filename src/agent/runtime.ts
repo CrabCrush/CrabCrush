@@ -589,7 +589,7 @@ export class AgentRuntime {
 
       const planSteps = this.buildToolPlan(toolCalls, parsedArgsList, baseToolContext);
       const planSummary = planSteps.length === 1 ? '准备执行 1 个步骤' : `准备执行 ${planSteps.length} 个步骤`;
-      emitAudit({ type: 'tool_plan', operationId, round: toolRound, steps: planSteps.map((s) => s.name) });
+      emitAudit({ type: 'tool_plan', operationId, round: toolRound, summary: planSummary, steps: planSteps });
       this.store?.saveMessage(
         sessionId,
         'assistant',
@@ -668,7 +668,7 @@ export class AgentRuntime {
           requestPermission: createRequestPermission(stepIndex),
         };
 
-        emitAudit({ type: 'tool_call', operationId, stepIndex, name: tc.function.name, toolName: tc.function.name });
+        emitAudit({ type: 'tool_call', operationId, stepIndex, name: tc.function.name, toolName: tc.function.name, args });
 
         const result = this.toolRegistry
           ? await this.toolRegistry.execute(tc.function.name, args, toolContext)
@@ -680,6 +680,8 @@ export class AgentRuntime {
           stepIndex,
           name: tc.function.name,
           toolName: tc.function.name,
+          args,
+          result: result.content,
           success: result.success,
         });
 
@@ -802,3 +804,4 @@ export class AgentRuntime {
     return this.sessions.size;
   }
 }
+

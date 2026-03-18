@@ -656,6 +656,8 @@
       url.searchParams.set('session', sessionId);
       history.replaceState(null, '', url.toString());
       clearTaskStates('已切换会话，等待新的任务执行。');
+      lastAuditEvents = [];
+      if (auditTimeline) auditTimeline.innerHTML = '<div style="color:var(--text-muted)">正在加载执行审计...</div>';
       if (ws && ws.readyState === 1) {
         ws.send(JSON.stringify({ type: 'loadHistory', sessionId, limit: 100 }));
         requestAuditEvents();
@@ -672,6 +674,7 @@
       history.replaceState(null, '', url.toString());
       messagesEl.innerHTML = '<div class="welcome"><div class="emoji">🦀</div><h2>你好！我是 CrabCrush</h2><p>做你的虾兵蟹将 —— 随时为你服务<br>输入消息开始对话吧</p></div>';
       clearTaskStates('当前暂无进行中的任务。');
+      lastAuditEvents = [];
       if (auditTimeline) auditTimeline.innerHTML = '<div style="color:var(--text-muted)">当前会话暂无可回放的执行审计。</div>';
       if (auditDetails) auditDetails.open = false;
       if (grantsPanel) grantsPanel.innerHTML = '<div style="color:var(--text-muted)">当前暂无持久授权记录。</div>';
@@ -727,6 +730,7 @@
     let activeConfirm = null;
     const taskStates = new Map();
     let currentTaskOperationId = null;
+    let lastAuditEvents = [];
 
     const taskStatusLabels = {
       planning: '准备中',
@@ -974,6 +978,188 @@
       renderTaskPanel();
     }
 
+    function getAuditPayload(event) {
+      return event && typeof event.payload === 'object' && event.payload ? event.payload : {};
+    }
+
+    function getAuditOperationId(event) {
+      const payload = getAuditPayload(event);
+      if (typeof event?.operationId === 'string' && event.operationId) return event.operationId;
+      if (typeof payload.operationId === 'string' && payload.operationId) return payload.operationId;
+      return '';
+    }
+
+    function getAuditStepIndex(event) {
+      const payload = getAuditPayload(event);
+      const raw = payload.stepIndex ?? event?.stepIndex;
+      const stepIndex = Number(raw);
+      return Number.isFinite(stepIndex) && stepIndex > 0 ? stepIndex : null;
+    }
+
+    function isReplayableAuditEvent(event) {
+      return [
+        'tool_plan',
+        'tool_plan_result',
+        'tool_confirm_request',
+        'tool_confirm_result',
+        'tool_confirm',
+        'permission_request_result',
+        'tool_call',
+        'tool_result',
+      ].includes(event?.eventType);
+    }
+
+    function focusTaskOperation(operationId) {
+      if (!operationId || !taskStates.has(operationId)) return;
+      currentTaskOperationId = operationId;
+      if (taskDetails) taskDetails.open = true;
+      renderTaskPanel();
+      renderAuditEvents(lastAuditEvents);
+    }
+
+    function focusTaskFromAudit(button) {
+      const operationId = button?.dataset?.operationId;
+      if (!operationId) return;
+      focusTaskOperation(operationId);
+    }
+    window.focusTaskFromAudit = focusTaskFromAudit;
+
+    function rebuildTasksFromAuditEvents(events) {
+      taskStates.clear();
+      currentTaskOperationId = null;
+      const replayable = Array.isArray(events) ? events.filter(isReplayableAuditEvent) : [];
+      for (const event of replayable) {
+        const payload = getAuditPayload(event);
+        const operationId = getAuditOperationId(event);
+        if (!operationId) continue;
+        const task = ensureTaskState(operationId);
+        if (!task) continue;
+        const stepIndex = getAuditStepIndex(event);
+        const stepName = payload.name || event.toolName || '未命名步骤';
+
+        if (event.eventType === 'tool_plan') {
+          const steps = Array.isArray(payload.steps) ? payload.steps : [];
+          task.round = Number(payload.round || 0);
+          task.summary = payload.summary || '执行任务';
+          task.status = 'planning';
+          task.summaryText = '执行计划已生成，等待下一步。';
+          task.steps = steps.map((step, idx) => {
+            const stepData = step && typeof step === 'object' ? step : {};
+            const name = typeof step === 'string' ? step : stepData.name || `步骤 ${idx + 1}`;
+            const preview = stepData.preview && typeof stepData.preview === 'object' ? stepData.preview : {};
+            return {
+              index: Number(stepData.index || idx + 1),
+              name,
+              title: preview.title || name,
+              summary: preview.summary || '',
+              riskLevel: preview.riskLevel || '',
+              targets: Array.isArray(preview.targets) ? preview.targets : [],
+              grantCovered: Boolean(stepData.grantCovered),
+              status: 'pending',
+              result: '',
+            };
+          });
+          continue;
+        }
+
+        if (event.eventType === 'tool_plan_result') {
+          task.status = event.allowed ? 'running' : 'rejected';
+          task.summaryText = event.allowed
+            ? (payload.autoApproved ? '执行计划已自动批准，开始执行。' : '执行计划已批准，开始执行。')
+            : '已拒绝执行计划，本轮将降级为只给方案。';
+          continue;
+        }
+
+        if (event.eventType === 'tool_confirm_request' || event.eventType === 'tool_confirm') {
+          task.status = 'waiting_confirm';
+          if (payload.kind === 'plan' || (!stepIndex && payload.name === 'execute_plan')) {
+            task.summaryText = '等待批准执行计划。';
+          } else if (stepIndex) {
+            const step = ensureTaskStep(task, stepIndex, stepName);
+            step.status = 'waiting_confirm';
+            if (payload.preview?.title) step.title = payload.preview.title;
+            if (payload.preview?.summary) step.summary = payload.preview.summary;
+            if (payload.preview?.riskLevel) step.riskLevel = payload.preview.riskLevel;
+            if (Array.isArray(payload.preview?.targets)) step.targets = payload.preview.targets;
+            task.summaryText = `等待确认第 ${step.index} 步。`;
+          }
+          continue;
+        }
+
+        if (event.eventType === 'tool_confirm_result' || event.eventType === 'permission_request_result') {
+          const isPlanResult = payload.kind === 'plan' || (!stepIndex && payload.name === 'execute_plan' && event.eventType !== 'permission_request_result');
+          if (isPlanResult) {
+            task.status = event.allowed ? 'running' : 'rejected';
+            task.summaryText = event.allowed ? '执行计划已批准，开始执行。' : '已拒绝执行计划，本轮将降级为只给方案。';
+          } else if (stepIndex) {
+            const step = ensureTaskStep(task, stepIndex, stepName);
+            if (event.allowed) {
+              step.status = 'pending';
+              task.status = 'running';
+              task.summaryText = `已允许第 ${step.index} 步${event.scope === 'persistent' ? '（永久）' : event.scope === 'session' ? '（本会话）' : ''}。`;
+            } else {
+              step.status = 'rejected';
+              task.status = 'degraded';
+              step.result = event.eventType === 'permission_request_result'
+                ? '用户拒绝授予执行该步骤所需权限。'
+                : '用户拒绝执行该步骤。';
+              task.summaryText = `已拒绝第 ${step.index} 步，当前任务将降级为只给方案。`;
+            }
+          }
+          continue;
+        }
+
+        if (event.eventType === 'tool_call' && stepIndex) {
+          const step = ensureTaskStep(task, stepIndex, stepName);
+          step.status = 'running';
+          task.status = 'running';
+          task.summaryText = `正在执行第 ${step.index} 步。`;
+          continue;
+        }
+
+        if (event.eventType === 'tool_result' && stepIndex) {
+          const step = ensureTaskStep(task, stepIndex, stepName);
+          if (typeof payload.result === 'string') step.result = payload.result;
+          const rejected = typeof step.result === 'string' && (step.result.includes('用户拒绝执行工具') || step.result.includes('确认超时') || step.result.includes('需要用户确认'));
+          if (payload.success) {
+            step.status = 'success';
+            task.status = 'running';
+            task.summaryText = `已完成第 ${step.index} 步。`;
+          } else {
+            step.status = rejected ? 'rejected' : 'failed';
+            task.status = rejected ? 'degraded' : 'failed';
+            task.summaryText = rejected ? `第 ${step.index} 步被拒绝，当前任务已降级。` : `第 ${step.index} 步执行失败。`;
+          }
+        }
+      }
+
+      if (!currentTaskOperationId) {
+        clearTaskStates('当前暂无可回放的任务执行。');
+        return;
+      }
+
+      for (const task of taskStates.values()) {
+        const steps = Array.isArray(task.steps) ? task.steps : [];
+        const successCount = steps.filter((step) => step.status === 'success').length;
+        const failedCount = steps.filter((step) => step.status === 'failed').length;
+        const rejectedCount = steps.filter((step) => step.status === 'rejected').length;
+        const waitingCount = steps.filter((step) => step.status === 'waiting_confirm' || step.status === 'running' || step.status === 'pending').length;
+        if (task.status === 'running' || task.status === 'planning') {
+          if (failedCount > 0) {
+            task.status = 'failed';
+            task.summaryText = `执行结束：${successCount} 步成功，${failedCount} 步失败。`;
+          } else if (rejectedCount > 0) {
+            task.status = 'degraded';
+            task.summaryText = `任务未完整执行：${rejectedCount} 步被拒绝，已降级为只给方案。`;
+          } else if (steps.length > 0 && waitingCount === 0) {
+            task.status = 'completed';
+            task.summaryText = `执行完成：${successCount}/${steps.length} 步成功。`;
+          }
+        }
+      }
+
+      renderTaskPanel();
+    }
     function formatAuditTime(ts) {
       if (!ts) return '';
       try {
@@ -984,14 +1170,15 @@
     }
 
     function summarizeAuditEvent(event) {
-      const payload = event.payload || {};
+      const payload = getAuditPayload(event);
       if (event.eventType === 'tool_plan') {
+        if (payload.summary) return `执行计划：${payload.summary}`;
         const steps = Array.isArray(payload.steps) ? payload.steps.length : 0;
         return `计划审批：${steps} 个步骤待执行`;
       }
       if (event.eventType === 'tool_plan_result') return event.allowed ? '已批准执行计划' : '已拒绝执行计划';
       if (event.eventType === 'permission_request_result') {
-        return `${event.allowed ? '已授权' : '已拒绝'}权限：${payload.action || event.eventType}`;
+        return `${event.allowed ? '已授权' : '已拒绝'}权限：${payload.action || payload.name || event.eventType}`;
       }
       if (event.eventType === 'tool_confirm_request') return `等待确认：${payload.name || event.toolName || '未命名操作'}`;
       if (event.eventType === 'tool_confirm_result' || event.eventType === 'tool_confirm') {
@@ -1006,30 +1193,38 @@
 
     function renderAuditEvents(events) {
       if (!auditTimeline) return;
-      const replayable = Array.isArray(events) ? events.filter((event) => [
-        'tool_plan',
-        'tool_plan_result',
-        'tool_confirm_request',
-        'tool_confirm_result',
-        'tool_confirm',
-        'permission_request_result',
-        'tool_call',
-        'tool_result',
-      ].includes(event.eventType)) : [];
+      const replayable = Array.isArray(events) ? events.filter(isReplayableAuditEvent) : [];
       if (replayable.length === 0) {
         auditTimeline.innerHTML = '<div style="color:var(--text-muted)">当前会话暂无可回放的执行审计。</div>';
         return;
       }
-      auditTimeline.innerHTML = replayable.map((event) => `
-        <div style="padding:0.55rem 0;border-bottom:1px solid rgba(255,255,255,0.06)">
+      auditTimeline.innerHTML = replayable.map((event) => {
+        const operationId = getAuditOperationId(event);
+        const stepIndex = getAuditStepIndex(event);
+        const clickable = Boolean(operationId && taskStates.has(operationId));
+        const active = clickable && operationId === currentTaskOperationId;
+        const body = `
           <div style="display:flex;justify-content:space-between;gap:0.6rem">
             <strong style="color:var(--text)">${escapeHtml(summarizeAuditEvent(event))}</strong>
             <span style="color:var(--text-muted)">${escapeHtml(formatAuditTime(event.createdAt))}</span>
           </div>
+          ${stepIndex ? `<div style="margin-top:0.2rem;color:var(--text-muted)">步骤：第 ${escapeHtml(String(stepIndex))} 步</div>` : ''}
           ${event.scope ? `<div style="margin-top:0.2rem;color:var(--text-muted)">范围：${escapeHtml(String(event.scope))}</div>` : ''}
           ${event.grantKey ? `<div style="margin-top:0.2rem;color:var(--text-muted)">授权键：${escapeHtml(String(event.grantKey))}</div>` : ''}
-        </div>
-      `).join('');
+          ${operationId ? `<div style="margin-top:0.2rem;color:var(--text-muted)">任务：${escapeHtml(String(operationId))}</div>` : ''}
+        `;
+        if (!clickable) {
+          return `<div style="padding:0.55rem 0;border-bottom:1px solid rgba(255,255,255,0.06)">${body}</div>`;
+        }
+        return `
+          <button
+            type="button"
+            data-operation-id="${escapeHtml(String(operationId))}"
+            onclick="focusTaskFromAudit(this)"
+            style="width:100%;padding:0.55rem 0.6rem;border:none;border-radius:8px;text-align:left;cursor:pointer;color:inherit;background:${active ? 'rgba(96,165,250,0.12)' : 'transparent'};border-bottom:1px solid rgba(255,255,255,0.06)"
+          >${body}</button>
+        `;
+      }).join('');
     }
 
     function requestAuditEvents() {
@@ -1246,6 +1441,7 @@
           const fragment = renderMessagesToFragment(msg.messages || []);
           if (!append) {
             clearTaskStates('当前暂无进行中的任务。');
+      lastAuditEvents = [];
             messagesEl.innerHTML = '';
             welcomeShown = false;
             if (fragment.childNodes.length > 0) {
@@ -1280,7 +1476,9 @@
             messagesEl.scrollTop = prevScrollTop + (messagesEl.scrollHeight - prevScrollHeight);
           }
         } else if (msg.type === 'audit_events') {
-          renderAuditEvents(msg.events || []);
+          lastAuditEvents = Array.isArray(msg.events) ? msg.events : [];
+          rebuildTasksFromAuditEvents(lastAuditEvents);
+          renderAuditEvents(lastAuditEvents);
         } else if (msg.type === 'permission_grants') {
           renderPermissionGrants(msg.grants || []);
         } else if (msg.type === 'permission_grant_revoked') {
@@ -1549,5 +1747,8 @@
   </script>
 </body>
 </html>
+
+
+
 
 

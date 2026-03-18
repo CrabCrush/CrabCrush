@@ -5,6 +5,16 @@
 ---
 
 ## [未发布]
+### 2026-03-18
+
+#### feat: 审计回放联动当前任务面板
+
+- 为 `tool_plan / tool_call / tool_result` 审计事件补充 `summary / steps / args / result` payload，方便历史任务重建
+- WebChat 现在会基于 `audit_events` 重建历史任务状态，刷新页面或切换旧会话后也能恢复最近一次执行视图
+- 审计回放时间线支持按 `operationId` 选中任务，并同步切换“当前任务”面板内容
+- 为 Gateway 审计回放补充回归断言，锁住任务重建所依赖的 payload 字段
+- 全量测试与构建通过
+
 ### 2026-03-17
 
 #### feat: WebChat 当前任务面板 V1
@@ -474,6 +484,8 @@ WebChat 和核心引擎的完善，从"能跑"到"好用"。
 - CLI 入口：Commander.js
 - TypeScript strict mode 配置
 - GPL-3.0 License
+
+
 
 
 

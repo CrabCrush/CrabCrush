@@ -610,10 +610,33 @@ describe('Gateway WebSocket confirm flow', () => {
 
       const events = await loadAuditEvents(ws, currentSessionId);
       const eventTypes = events.map((event) => event.eventType);
+      const toolPlanEvent = events.find((event) => event.eventType === 'tool_plan');
+      const toolResultEvent = events.find((event) => event.eventType === 'tool_result');
       expect(eventTypes).toContain('tool_plan');
       expect(eventTypes).toContain('tool_plan_result');
       expect(eventTypes).toContain('tool_confirm_request');
       expect(eventTypes).toContain('tool_result');
+      expect(toolPlanEvent).toMatchObject({
+        operationId: expect.any(String),
+        payload: {
+          summary: '准备执行 1 个步骤',
+          steps: [
+            expect.objectContaining({
+              index: 1,
+              name: 'secure_action',
+            }),
+          ],
+        },
+      });
+      expect(toolResultEvent).toMatchObject({
+        operationId: toolPlanEvent?.operationId,
+        payload: {
+          stepIndex: 1,
+          name: 'secure_action',
+          result: 'write ok',
+          success: true,
+        },
+      });
     } finally {
       ws.close();
       await server.close();
@@ -673,4 +696,5 @@ describe('Gateway WebSocket confirm flow', () => {
     }
   });
 });
+
 

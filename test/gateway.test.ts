@@ -10,6 +10,7 @@ import { ToolRegistry } from '../src/tools/registry.js';
 import type { Tool } from '../src/tools/types.js';
 import type { ChatChunk, ChatMessage, ChatOptions } from '../src/models/provider.js';
 import { ConversationStore } from '../src/storage/database.js';
+import { DEFAULT_WORKSPACE_AGENT_TEMPLATE } from '../src/workspace/index.js';
 
 describe('Gateway', () => {
   const app = createGateway({ logger: false });
@@ -26,6 +27,76 @@ describe('Gateway', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ status: 'ok' });
+  });
+});
+
+
+class IdleRouter {
+  async *chat(_messages: ChatMessage[], _options: ChatOptions = {}): AsyncIterable<ChatChunk> {
+    yield { content: 'idle', done: false };
+    yield { content: '', done: true, model: 'mock-model' };
+  }
+}
+
+describe('Gateway workspace API', () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'crabcrush-gateway-workspace-'));
+  const runtime = new AgentRuntime({
+    router: new IdleRouter() as never,
+    systemPrompt: 'test',
+    maxTokens: 256,
+    ownerIds: [],
+    fileBase: tempDir,
+  });
+  const app = createGateway({ logger: false, agent: runtime });
+
+  afterAll(async () => {
+    await app.close();
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('GET /api/workspace returns current workspace files', async () => {
+    const response = await app.inject({ method: 'GET', url: '/api/workspace' });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      workspace: {
+        agent: DEFAULT_WORKSPACE_AGENT_TEMPLATE,
+        identity: '',
+        user: '',
+        soul: '',
+      },
+    });
+  });
+
+  it('PUT /api/workspace saves workspace files and returns normalized content', async () => {
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/api/workspace',
+      payload: {
+        agent: '  请长期用中文，结论优先。  ',
+        identity: ' 小螃蟹 ',
+        user: ' 小明 ',
+        soul: ' 真诚有用 ',
+      },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      workspace: {
+        agent: '请长期用中文，结论优先。',
+        identity: '小螃蟹',
+        user: '小明',
+        soul: '真诚有用',
+      },
+    });
+
+    const followUp = await app.inject({ method: 'GET', url: '/api/workspace' });
+    expect(followUp.json()).toEqual({
+      workspace: {
+        agent: '请长期用中文，结论优先。',
+        identity: '小螃蟹',
+        user: '小明',
+        soul: '真诚有用',
+      },
+    });
   });
 });
 
@@ -696,5 +767,4 @@ describe('Gateway WebSocket confirm flow', () => {
     }
   });
 });
-
 

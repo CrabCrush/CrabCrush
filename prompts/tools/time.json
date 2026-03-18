@@ -1,0 +1,8 @@
+{
+  "get_current_time": {
+    "description": "获取当前日期和时间。当用户询问\"现在几点\"、\"今天几号\"、\"今天星期几\"等与时间日期相关的问题时调用此工具。",
+    "parameters": {
+      "timezone": "时区，如 \"Asia/Shanghai\"（默认中国时间）"
+    }
+  }
+}

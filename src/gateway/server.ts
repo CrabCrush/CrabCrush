@@ -31,6 +31,34 @@ export function createGateway(options: GatewayOptions = {}): FastifyInstance {
 
   app.get('/health', async () => ({ status: 'ok' }));
 
+  if (options.agent) {
+    const agent = options.agent;
+
+    app.get('/api/workspace', async () => {
+      const workspace = await agent.getWorkspaceSettings();
+      return { workspace };
+    });
+
+    app.put('/api/workspace', async (request, reply) => {
+      const body = (request.body && typeof request.body === 'object') ? request.body as Record<string, unknown> : null;
+      if (!body) {
+        reply.status(400);
+        return {
+          error: {
+            code: 'INVALID_BODY',
+            message: '请求体必须是 JSON 对象',
+          },
+        };
+      }
+      const workspace = await agent.saveWorkspaceSettings({
+        agent: typeof body.agent === 'string' ? body.agent : '',
+        identity: typeof body.identity === 'string' ? body.identity : '',
+        user: typeof body.user === 'string' ? body.user : '',
+        soul: typeof body.soul === 'string' ? body.soul : '',
+      });
+      return { workspace };
+    });
+  }
   // 统一错误格式
   app.setErrorHandler((err, _request, reply) => {
     const error = err as Error & { statusCode?: number; code?: string };
@@ -89,6 +117,7 @@ export async function startGateway(options: GatewayOptions = {}) {
 
   // 注册 WebSocket 插件
   await app.register(fastifyWebSocket);
+
 
   // WebSocket 聊天端点
   if (options.agent) {

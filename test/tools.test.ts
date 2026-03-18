@@ -2,14 +2,14 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createDefaultPromptRegistry } from '../src/prompts/defaults.js';
 import { ToolRegistry } from '../src/tools/registry.js';
-import { getCurrentTimeTool } from '../src/tools/builtin/time.js';
-import { browseUrlTool } from '../src/tools/builtin/browser.js';
-import { searchWebTool } from '../src/tools/builtin/search.js';
-import { readFileTool, listFilesTool, writeFileTool } from '../src/tools/builtin/file.js';
+import { createGetCurrentTimeTool, getCurrentTimeTool } from '../src/tools/builtin/time.js';
+import { createBrowseUrlTool, browseUrlTool } from '../src/tools/builtin/browser.js';
+import { createSearchWebTool, searchWebTool } from '../src/tools/builtin/search.js';
+import { readFileTool, listFilesTool, createWriteFileTool, writeFileTool } from '../src/tools/builtin/file.js';
 import type { Tool, ToolContext, ToolResult } from '../src/tools/types.js';
 
-// 创建测试用的 mock 工具
 function createMockTool(overrides: Partial<Tool> = {}): Tool {
   return {
     definition: {
@@ -52,12 +52,10 @@ describe('ToolRegistry', () => {
       permission: 'owner',
     }));
 
-    // 非 owner 只能看到 public 工具
     const publicDefs = registry.getDefinitionsForModel(false);
     expect(publicDefs).toHaveLength(1);
     expect(publicDefs[0].name).toBe('public_tool');
 
-    // owner 能看到所有工具
     const ownerDefs = registry.getDefinitionsForModel(true);
     expect(ownerDefs).toHaveLength(2);
   });
@@ -110,6 +108,20 @@ describe('ToolRegistry', () => {
     expect(result.content).toContain('boom');
   });
 });
+describe('tool prompt registry injection', () => {
+  it('injects custom prompts into time/browser/search/file tool definitions', () => {
+    const prompts = createDefaultPromptRegistry('你是测试 Prompt。');
+    prompts.tools.time.get_current_time.description = '自定义时间工具描述';
+    prompts.tools.browser.browse_url.description = '自定义网页工具描述';
+    prompts.tools.search.search_web.description = '自定义搜索工具描述';
+    prompts.tools.file.write_file.description = '自定义写文件描述';
+
+    expect(createGetCurrentTimeTool(prompts).definition.description).toBe('自定义时间工具描述');
+    expect(createBrowseUrlTool(prompts).definition.description).toBe('自定义网页工具描述');
+    expect(createSearchWebTool(prompts).definition.description).toBe('自定义搜索工具描述');
+    expect(createWriteFileTool(undefined, prompts).definition.description).toBe('自定义写文件描述');
+  });
+});
 
 describe('get_current_time tool', () => {
   it('returns current time in default timezone', async () => {
@@ -118,7 +130,6 @@ describe('get_current_time tool', () => {
 
     expect(result.success).toBe(true);
     expect(result.content).toContain('Asia/Shanghai');
-    // 应该包含年月日
     expect(result.content).toMatch(/\d{4}/);
   });
 
@@ -162,7 +173,6 @@ describe('browse_url tool', () => {
     expect(browseUrlTool.permission).toBe('owner');
   });
 
-  // 需要 Chromium + 网络，CI 环境常失败，本地可手动运行
   it.skip('fetches example.com when given valid url', async () => {
     const ctx: ToolContext = { senderId: 'owner-1', isOwner: true, sessionId: 'sess-1' };
     const result = await browseUrlTool.execute({ url: 'https://example.com' }, ctx);
@@ -204,7 +214,6 @@ describe('search_web tool', () => {
     expect(searchWebTool.permission).toBe('owner');
   });
 
-  // 需要 Chromium + 网络，auto 模式会依次尝试 Google/Bing/百度
   it.skip('searches when given valid query', async () => {
     const ctx: ToolContext = { senderId: 'owner-1', isOwner: true, sessionId: 'sess-1' };
     const result = await searchWebTool.execute({ query: 'CrabCrush' }, ctx);
@@ -370,6 +379,100 @@ describe('write_file tool', () => {
     }
   });
 
+  it('rejects reserved workspace files at fileBase root', async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'crabcrush-writefile-'));
+    const origBase = process.env.CRABCRUSH_FILE_BASE;
+    process.env.CRABCRUSH_FILE_BASE = tmpDir;
+
+    try {
+      const result = await writeFileTool.execute(
+        { path: 'USER.md', content: '名字：小明' },
+        ctx,
+      );
+      expect(result.success).toBe(false);
+      expect(result.content).toContain('workspace/USER.md');
+    } finally {
+      process.env.CRABCRUSH_FILE_BASE = origBase;
+      rmSync(tmpDir, { recursive: true });
+    }
+  });
+
+  it('rejects AGENT.md at fileBase root and points to workspace path', async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'crabcrush-writefile-'));
+    const origBase = process.env.CRABCRUSH_FILE_BASE;
+    process.env.CRABCRUSH_FILE_BASE = tmpDir;
+
+    try {
+      const result = await writeFileTool.execute(
+        { path: 'AGENT.md', content: '请长期用中文，结论优先。' },
+        ctx,
+      );
+      expect(result.success).toBe(false);
+      expect(result.content).toContain('workspace/AGENT.md');
+    } finally {
+      process.env.CRABCRUSH_FILE_BASE = origBase;
+      rmSync(tmpDir, { recursive: true });
+    }
+  });
+
+  it('rejects lowercase reserved workspace files at fileBase root', async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'crabcrush-writefile-'));
+    const origBase = process.env.CRABCRUSH_FILE_BASE;
+    process.env.CRABCRUSH_FILE_BASE = tmpDir;
+
+    try {
+      const result = await writeFileTool.execute(
+        { path: 'agent.md', content: '请长期用中文，结论优先。' },
+        ctx,
+      );
+      expect(result.success).toBe(false);
+      expect(result.content).toContain('workspace/AGENT.md');
+    } finally {
+      process.env.CRABCRUSH_FILE_BASE = origBase;
+      rmSync(tmpDir, { recursive: true });
+    }
+  });
+
+  it('allows AGENT.md under workspace directory', async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'crabcrush-writefile-'));
+    const origBase = process.env.CRABCRUSH_FILE_BASE;
+    process.env.CRABCRUSH_FILE_BASE = tmpDir;
+
+    try {
+      const result = await writeFileTool.execute(
+        { path: 'workspace/AGENT.md', content: '请长期用中文，结论优先。' },
+        ctx,
+      );
+      expect(result.success).toBe(true);
+      const read = await readFileTool.execute({ path: 'workspace/AGENT.md' }, ctx);
+      expect(read.success).toBe(true);
+      expect(read.content).toContain('结论优先');
+    } finally {
+      process.env.CRABCRUSH_FILE_BASE = origBase;
+      rmSync(tmpDir, { recursive: true });
+    }
+  });
+
+  it('allows reserved workspace files under workspace directory', async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'crabcrush-writefile-'));
+    const origBase = process.env.CRABCRUSH_FILE_BASE;
+    process.env.CRABCRUSH_FILE_BASE = tmpDir;
+
+    try {
+      const result = await writeFileTool.execute(
+        { path: 'workspace/USER.md', content: '名字：小明' },
+        ctx,
+      );
+      expect(result.success).toBe(true);
+      const read = await readFileTool.execute({ path: 'workspace/USER.md' }, ctx);
+      expect(read.success).toBe(true);
+      expect(read.content).toContain('小明');
+    } finally {
+      process.env.CRABCRUSH_FILE_BASE = origBase;
+      rmSync(tmpDir, { recursive: true });
+    }
+  });
+
   it('rejects overwrite when file exists', async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), 'crabcrush-writefile-'));
     const origBase = process.env.CRABCRUSH_FILE_BASE;
@@ -447,6 +550,7 @@ describe('write_file tool', () => {
     expect(writeFileTool.confirmRequired).toBe(true);
   });
 });
+
 describe('tool plan policy', () => {
   it('marks low-risk built-in tools as safe_auto', () => {
     expect(getCurrentTimeTool.planPolicy).toBe('safe_auto');

@@ -22,11 +22,16 @@ import type {
 } from '../tools/types.js';
 import { looksLikeFileToolRequest } from '../tools/intent.js';
 import { getPrincipalKey, inferGrantResource } from '../permissions/utils.js';
+import { createDefaultPromptRegistry } from '../prompts/defaults.js';
+import type { PromptRegistry } from '../prompts/types.js';
 import {
   getWorkspacePath,
   ensureWorkspaceDir,
+  ensureWorkspaceSeedFiles,
   readWorkspaceFiles,
+  saveWorkspaceFiles,
   buildSystemPrompt,
+  type WorkspaceContent,
 } from '../workspace/index.js';
 
 export interface Session {
@@ -38,7 +43,7 @@ export interface Session {
 
 export interface AgentRuntimeOptions {
   router: ModelRouter;
-  /** 基础 system prompt（会与工作区内容、Bootstrap 组装） */
+  /** 基础 system prompt（作为 PromptRegistry 的默认 base 回退） */
   systemPrompt: string;
   maxTokens: number;
   /** SQLite 存储（不传则纯内存模式，重启丢失） */
@@ -55,6 +60,8 @@ export interface AgentRuntimeOptions {
   fileBase?: string;
   /** 审计日志回调（可选） */
   auditLogger?: (event: { type: string; [key: string]: unknown }) => void;
+  /** 已加载并缓存的 PromptRegistry（可选；不传则基于 systemPrompt 使用默认内置 prompt） */
+  prompts?: PromptRegistry;
 }
 
 /** 工具调用事件 — 通过 yield 返回给调用方，用于 UI 展示 */
@@ -101,18 +108,6 @@ const TOOL_BLOCK_START = '__TOOL_CALL__\n';
 const TOOL_PLAN_BLOCK_START = '__TOOL_PLAN__\n';
 const TOOL_PLAN_RESULT_BLOCK_START = '__TOOL_PLAN_RESULT__\n';
 const TOOL_BLOCK_END = '\n__END__';
-const FILE_TOOL_REQUIRED_MESSAGE = '当前请求涉及文件状态或文件读写，但模型本轮没有调用必要工具。我需要先通过工具确认后才能继续，请重试。';
-const ADVICE_ONLY_DEGRADE_PROMPT = `
-【降级执行模式】
-用户刚刚拒绝了执行计划或工具确认，或者确认已超时。
-你现在必须进入“只给方案、不动手”模式：
-- 明确说明这次没有实际执行
-- 不要再调用工具，也不要声称已经完成了文件/网页/系统操作
-- 如果已有部分工具结果，可以基于这些已知结果继续总结
-- 给出纯文本的替代方案、手动步骤或可复制内容
-- 保持语气自然、简洁、可执行
-`;
-
 function serializeToolBlock(t: { name: string; args: Record<string, unknown>; result: string; success: boolean }): string {
   return TOOL_BLOCK_START + JSON.stringify(t) + TOOL_BLOCK_END;
 }
@@ -152,7 +147,7 @@ export class AgentRuntime {
   private sessionPermissionGrants = new Map<string, Set<string>>();
   private sessionPrincipals = new Map<string, string>();
   private router: ModelRouter;
-  private basePrompt: string;
+  private prompts: PromptRegistry;
   private maxTokens: number;
   private store?: ConversationStore;
   private contextWindow: number;
@@ -164,7 +159,7 @@ export class AgentRuntime {
 
   constructor(options: AgentRuntimeOptions) {
     this.router = options.router;
-    this.basePrompt = options.systemPrompt;
+    this.prompts = options.prompts ?? createDefaultPromptRegistry(options.systemPrompt);
     this.maxTokens = options.maxTokens;
     this.store = options.store;
     this.contextWindow = options.contextWindow ?? 40;
@@ -174,6 +169,7 @@ export class AgentRuntime {
     this.workspacePath = getWorkspacePath(options.fileBase);
     this.auditLogger = options.auditLogger;
     ensureWorkspaceDir(this.workspacePath);
+    ensureWorkspaceSeedFiles(this.workspacePath);
   }
 
   /**
@@ -182,7 +178,7 @@ export class AgentRuntime {
    */
   private async resolveSystemPrompt(): Promise<string> {
     const content = await readWorkspaceFiles(this.workspacePath);
-    return buildSystemPrompt(this.basePrompt, content);
+    return buildSystemPrompt(this.prompts, content);
   }
 
   private getGrantSet(sessionId: string): Set<string> {
@@ -291,6 +287,14 @@ export class AgentRuntime {
     return planSteps.every((step) => this.shouldAutoApprovePlanStep(step));
   }
 
+  private buildPlanSummary(stepCount: number): string {
+    if (stepCount === 1) return this.prompts.runtime.planSummarySingle;
+    const template = this.prompts.runtime.planSummaryMultiple;
+    return template.includes('{{count}}')
+      ? template.replaceAll('{{count}}', String(stepCount))
+      : `准备执行 ${stepCount} 个步骤`;
+  }
+
   private buildPlanPreview(planSummary: string, planSteps: ToolPlanStep[]): ToolExecutionPreview {
     const highRiskCount = planSteps.filter((step) => step.preview?.riskLevel === 'high').length;
     const targets = planSteps.map((step, index) => {
@@ -319,7 +323,7 @@ export class AgentRuntime {
     signal?: AbortSignal,
   ): AsyncIterable<ChatChunk> {
     const recentMessages = session.messages.slice(-this.contextWindow);
-    const degradePrompt = `${systemPrompt}\n${ADVICE_ONLY_DEGRADE_PROMPT}\n【本轮未执行原因】${reason}`;
+    const degradePrompt = `${systemPrompt}\n${this.prompts.runtime.adviceOnlyDegrade}\n【本轮未执行原因】${reason}`;
     const messages: ChatMessage[] = [{ role: 'system', content: degradePrompt }, ...recentMessages];
     const chatOptions: ChatOptions = { maxTokens: this.maxTokens, signal };
     let fullContent = '';
@@ -414,7 +418,7 @@ export class AgentRuntime {
       // 滑动窗口
       const recentMessages = session.messages.slice(-this.contextWindow);
       const toolEnforcementHint = fileToolReminderUsed
-        ? '\n【工具强制要求】当前用户请求涉及文件状态或文件读写。你必须优先调用 read_file / list_files / write_file 等工具完成检查或写入，不能直接口头声称文件存在、已创建或已更新。'
+        ? `\n${this.prompts.runtime.fileToolEnforcement}`
         : '';
       const messages: ChatMessage[] = [{ role: 'system', content: systemPrompt + toolEnforcementHint }, ...recentMessages];
 
@@ -474,9 +478,9 @@ export class AgentRuntime {
           if (streamedContent || fullContent) {
             yield { type: 'stream_control', action: 'clear_last', reason: 'tool_calls' };
           }
-          session.messages.push({ role: 'assistant', content: FILE_TOOL_REQUIRED_MESSAGE });
-          this.store?.saveMessage(sessionId, 'assistant', FILE_TOOL_REQUIRED_MESSAGE);
-          yield { content: FILE_TOOL_REQUIRED_MESSAGE, done: false };
+          session.messages.push({ role: 'assistant', content: this.prompts.runtime.fileToolRequiredMessage });
+          this.store?.saveMessage(sessionId, 'assistant', this.prompts.runtime.fileToolRequiredMessage);
+          yield { content: this.prompts.runtime.fileToolRequiredMessage, done: false };
           yield { content: '', done: true };
           break;
         }
@@ -588,7 +592,7 @@ export class AgentRuntime {
       }
 
       const planSteps = this.buildToolPlan(toolCalls, parsedArgsList, baseToolContext);
-      const planSummary = planSteps.length === 1 ? '准备执行 1 个步骤' : `准备执行 ${planSteps.length} 个步骤`;
+      const planSummary = this.buildPlanSummary(planSteps.length);
       emitAudit({ type: 'tool_plan', operationId, round: toolRound, summary: planSummary, steps: planSteps });
       this.store?.saveMessage(
         sessionId,
@@ -609,7 +613,7 @@ export class AgentRuntime {
           senderId: senderId ?? sessionId,
           operationId,
           kind: 'plan',
-          message: '即将执行上述计划。批准后才会开始逐步执行和确认。',
+          message: this.prompts.runtime.planApprovalMessage,
           preview: this.buildPlanPreview(planSummary, planSteps),
           scopeOptions: ['once'],
           defaultScope: 'once',
@@ -795,6 +799,15 @@ export class AgentRuntime {
       grantKey,
     });
     return true;
+  }
+
+  async getWorkspaceSettings(): Promise<WorkspaceContent> {
+    return await readWorkspaceFiles(this.workspacePath);
+  }
+
+  async saveWorkspaceSettings(content: WorkspaceContent): Promise<WorkspaceContent> {
+    await saveWorkspaceFiles(this.workspacePath, content);
+    return await readWorkspaceFiles(this.workspacePath);
   }
 
   /**

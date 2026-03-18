@@ -12,12 +12,18 @@
  */
 
 import { chromium } from 'playwright';
+import { createDefaultPromptRegistry } from '../../prompts/defaults.js';
+import type { PromptRegistry } from '../../prompts/types.js';
 import type { PermissionRequest, Tool, ToolContext, ToolResult } from '../types.js';
 
 const GOOGLE_TIMEOUT_MS = 5_000; // 有代理时很快，无代理会超时
 const BING_BAIDU_TIMEOUT_MS = 12_000;
 const MAX_RESULTS = 10;
 const SEARCH_PERMISSION_GRANT_KEY = 'network:search_web';
+
+function getSearchToolPrompts(prompts?: PromptRegistry): PromptRegistry['tools']['search'] {
+  return (prompts ?? createDefaultPromptRegistry()).tools.search;
+}
 
 function encodeQuery(q: string): string {
   return encodeURIComponent(q.trim());
@@ -78,7 +84,6 @@ const ENGINES: Record<EngineId, EngineConfig> = {
     label: '百度',
   },
 };
-
 
 function getEngineOrder(): EngineId[] {
   const env = process.env.CRABCRUSH_SEARCH_ENGINE?.toLowerCase();
@@ -172,101 +177,106 @@ async function tryEngine(
   }
 }
 
-export const searchWebTool: Tool = {
-  definition: {
-    name: 'search_web',
-    description:
-      '在搜索引擎中搜索关键词并返回结果。支持 Google/Bing/百度，有代理时优先 Google。当用户说"帮我搜一下 XX"、"百度一下 XXX"、"查一下 XX"时调用。',
-    parameters: {
-      type: 'object',
-      properties: {
-        query: {
-          type: 'string',
-          description: '搜索关键词',
+export function createSearchWebTool(prompts?: PromptRegistry): Tool {
+  const searchPrompts = getSearchToolPrompts(prompts);
+
+  return {
+    definition: {
+      name: 'search_web',
+      description: searchPrompts.search_web.description,
+      parameters: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: searchPrompts.search_web.parameters.query,
+          },
         },
+        required: ['query'],
       },
-      required: ['query'],
     },
-  },
-  permission: 'owner',
-  confirmRequired: false,
-  buildPermissionRequest(args: Record<string, unknown>) {
-    return buildSearchPermissionRequest(args.query as string);
-  },
+    permission: 'owner',
+    confirmRequired: false,
+    buildPermissionRequest(args: Record<string, unknown>) {
+      return buildSearchPermissionRequest(args.query as string);
+    },
 
-  async execute(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {
-    const query = args.query as string;
+    async execute(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {
+      const query = args.query as string;
 
-    if (!query || typeof query !== 'string' || !query.trim()) {
-      return { success: false, content: '请提供有效的 query 参数' };
-    }
-
-    const order = getEngineOrder();
-    if (!context.hasPermissionGrant?.(SEARCH_PERMISSION_GRANT_KEY)) {
-      if (!context.requestPermission) {
-        return { success: false, content: '联网搜索需要通道支持权限确认。' };
+      if (!query || typeof query !== 'string' || !query.trim()) {
+        return { success: false, content: '请提供有效的 query 参数' };
       }
-      const allowed = await context.requestPermission(buildSearchPermissionRequest(query) ?? {
-        action: 'search_web',
-        message: `是否允许联网搜索该关键词？\n${query}`,
-        params: { query },
-        grantKey: SEARCH_PERMISSION_GRANT_KEY,
-      });
-      if (!allowed) return { success: false, content: '用户拒绝执行工具 "search_web"' };
-    }
 
-    let browser;
+      const order = getEngineOrder();
+      if (!context.hasPermissionGrant?.(SEARCH_PERMISSION_GRANT_KEY)) {
+        if (!context.requestPermission) {
+          return { success: false, content: '联网搜索需要通道支持权限确认。' };
+        }
+        const allowed = await context.requestPermission(buildSearchPermissionRequest(query) ?? {
+          action: 'search_web',
+          message: `是否允许联网搜索该关键词？\n${query}`,
+          params: { query },
+          grantKey: SEARCH_PERMISSION_GRANT_KEY,
+        });
+        if (!allowed) return { success: false, content: '用户拒绝执行工具 "search_web"' };
+      }
 
-    try {
-      browser = await chromium.launch({ headless: true });
-      const page = await browser.newPage();
+      let browser;
 
-      for (const engineId of order) {
-        const out = await tryEngine(page, engineId, query);
-        if (!out.success) continue;
+      try {
+        browser = await chromium.launch({ headless: true });
+        const page = await browser.newPage();
 
-        if (out.results && out.results.length > 0) {
-          const formatted = out.results
-            .map((r, i) => {
-              const snippet = (r.snippet || '').trim();
-              return `${i + 1}. ${r.title}\n   摘要: ${snippet || '（无）'}\n   链接: ${r.link}`;
-            })
-            .join('\n\n');
-          return {
-            success: true,
-            content: `【${out.label}搜索：${query}】\n\n${formatted}`,
-          };
+        for (const engineId of order) {
+          const out = await tryEngine(page, engineId, query);
+          if (!out.success) continue;
+
+          if (out.results && out.results.length > 0) {
+            const formatted = out.results
+              .map((r, i) => {
+                const snippet = (r.snippet || '').trim();
+                return `${i + 1}. ${r.title}\n   摘要: ${snippet || '（无）'}\n   链接: ${r.link}`;
+              })
+              .join('\n\n');
+            return {
+              success: true,
+              content: `【${out.label}搜索：${query}】\n\n${formatted}`,
+            };
+          }
+
+          if (out.fallback) {
+            return {
+              success: true,
+              content: `【${out.label}搜索：${query}】\n\n（未能解析结构化结果，以下是页面摘要）\n\n${out.fallback || '（无结果）'}`,
+            };
+          }
         }
 
-        if (out.fallback) {
-          return {
-            success: true,
-            content: `【${out.label}搜索：${query}】\n\n（未能解析结构化结果，以下是页面摘要）\n\n${out.fallback || '（无结果）'}`,
-          };
-        }
-      }
-
-      return {
-        success: false,
-        content: `所有搜索引擎均不可用（已尝试：${order.join('、')}）。若使用代理，请确保可访问 Google；否则请检查网络。`,
-      };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes('Timeout') || msg.includes('timeout')) {
-        return { success: false, content: `搜索超时，请检查网络` };
-      }
-      if (msg.includes('net::') || msg.includes('NS_')) {
-        return { success: false, content: `无法访问搜索引擎：${msg}` };
-      }
-      if (msg.includes('Executable') || msg.includes('browserType') || msg.includes('playwright')) {
         return {
           success: false,
-          content: 'Chromium 未安装。请先执行：npx playwright install chromium',
+          content: `所有搜索引擎均不可用（已尝试：${order.join('、')}）。若使用代理，请确保可访问 Google；否则请检查网络。`,
         };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes('Timeout') || msg.includes('timeout')) {
+          return { success: false, content: '搜索超时，请检查网络' };
+        }
+        if (msg.includes('net::') || msg.includes('NS_')) {
+          return { success: false, content: `无法访问搜索引擎：${msg}` };
+        }
+        if (msg.includes('Executable') || msg.includes('browserType') || msg.includes('playwright')) {
+          return {
+            success: false,
+            content: 'Chromium 未安装。请先执行：npx playwright install chromium',
+          };
+        }
+        return { success: false, content: `搜索失败：${msg}` };
+      } finally {
+        await browser?.close();
       }
-      return { success: false, content: `搜索失败：${msg}` };
-    } finally {
-      await browser?.close();
-    }
-  },
-};
+    },
+  };
+}
+
+export const searchWebTool = createSearchWebTool();

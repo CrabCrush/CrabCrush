@@ -1,0 +1,8 @@
+{
+  "search_web": {
+    "description": "在搜索引擎中搜索关键词并返回结果。支持 Google/Bing/百度，有代理时优先 Google。当用户说\"帮我搜一下 XX\"、\"百度一下 XXX\"、\"查一下 XX\"时调用。",
+    "parameters": {
+      "query": "搜索关键词"
+    }
+  }
+}

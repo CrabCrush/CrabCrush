@@ -7,6 +7,28 @@
 ## [未发布]
 ### 2026-03-18
 
+#### feat: Prompt 分层加载与工作区主入口收敛
+
+- 新增 `prompts/` 外部覆盖目录与 `PromptRegistry` 加载器，支持按层覆盖 system / runtime / workspace / tool prompts
+- 内置工具描述改为从 PromptRegistry 注入，避免工具内部继续散落维护 prompt 文案
+- WebChat 新增“工作区设置”面板，可直接编辑本地 `workspace/AGENT.md` 等文件
+- 首次启动会自动创建默认 `workspace/AGENT.md`，普通用户默认只需维护这一份主文件
+- `USER.md / IDENTITY.md / SOUL.md` 保留为高级可选层，不再作为普通用户的默认入口
+
+#### fix: Prompt 路径解析与工作区文件写入护栏
+
+- 修复 `prompts.dir` 相对路径解析：现在按配置文件所在目录解析，避免更换启动目录后失效
+- 修复显式配置 `prompts.dir` 时的静默回退问题：路径不存在时不再误用其他 prompts 目录
+- 为 Prompt JSON 覆盖文件补充可读错误提示，用户写坏 JSON 时会明确指出具体文件
+- `write_file` 对 `AGENT.md / USER.md / IDENTITY.md / SOUL.md` 的根目录误写入做大小写不敏感拦截，统一要求写到 `workspace/` 下
+
+#### refactor: WebChat 工作台抽屉与界面清理
+
+- 将“当前任务 / 审计回放 / 持久授权记录 / 工作区设置”统一收敛到右侧抽屉工作台，避免遮挡主聊天区
+- 清理 WebChat 中遗留的旧双侧栏状态、空实现和无效样式，减少后续维护成本
+- README 同步调整为“普通用户默认只维护 AGENT.md”，移除临时备忘式文案
+- 全量测试、构建通过；`pnpm lint` 仅剩既有的 4 条非本次引入 warning
+
 #### feat: 审计回放联动当前任务面板
 
 - 为 `tool_plan / tool_call / tool_result` 审计事件补充 `summary / steps / args / result` payload，方便历史任务重建

@@ -23,11 +23,98 @@
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
         'Microsoft YaHei', system-ui, sans-serif;
-      background: var(--bg);
+      background: radial-gradient(circle at top, rgba(96,165,250,0.08), transparent 28%), var(--bg);
       color: var(--text);
       height: 100vh;
       display: flex;
       flex-direction: column;
+      overflow: hidden;
+    }
+
+    #app-shell {
+      flex: 1;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: var(--left-rail-width, minmax(260px, 320px)) minmax(0, 1fr) var(--right-rail-width, minmax(260px, 320px));
+      gap: 1rem;
+      padding: 1rem;
+      overflow: hidden;
+    }
+
+    #chat-column {
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      background: rgba(255,255,255,0.02);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 16px 40px rgba(0,0,0,0.18);
+    }
+
+    .side-rail {
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.85rem;
+      overflow: hidden;
+    }
+
+    .side-panel {
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      background: rgba(255,255,255,0.02);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+    }
+
+    .side-panel > summary {
+      cursor: pointer;
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      padding: 0.85rem 1rem;
+      list-style: none;
+      border-bottom: 1px solid transparent;
+      background: rgba(255,255,255,0.01);
+    }
+
+    .side-panel[open] > summary {
+      border-bottom-color: rgba(255,255,255,0.06);
+      color: var(--text);
+    }
+
+    .side-panel > summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .side-panel-body {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      padding: 0.85rem 1rem 1rem;
+      font-size: 0.82rem;
+      color: var(--text-muted);
+    }
+
+    .side-panel-body::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .side-panel-body::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 999px;
+    }
+
+    #task-details {
+      min-height: 220px;
+    }
+
+    #audit-details,
+    #grants-details {
+      flex: 1;
     }
 
     /* Header */
@@ -115,10 +202,11 @@
     /* Status bar */
     #status {
       text-align: center;
-      padding: 0.3rem;
+      padding: 0.45rem 0.8rem;
       font-size: 0.72rem;
       color: var(--text-muted);
-      background: var(--surface);
+      background: rgba(255,255,255,0.02);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
       flex-shrink: 0;
     }
     #status.connected { color: #4ade80; }
@@ -127,8 +215,9 @@
     /* Messages area */
     #messages {
       flex: 1;
+      min-height: 0;
       overflow-y: auto;
-      padding: 1rem;
+      padding: 1.1rem 1.25rem;
       scroll-behavior: smooth;
     }
     #messages::-webkit-scrollbar { width: 6px; }
@@ -334,9 +423,9 @@
 
     /* Input area */
     #input-area {
-      padding: 0.75rem 1rem;
-      background: var(--surface);
-      border-top: 1px solid var(--border);
+      padding: 0.9rem 1rem 1rem;
+      background: rgba(255,255,255,0.02);
+      border-top: 1px solid rgba(255,255,255,0.06);
       display: flex;
       gap: 0.5rem;
       align-items: flex-end;
@@ -439,13 +528,465 @@
       font-size: 0.85rem;
     }
 
+    @media (max-width: 1180px) {
+      body {
+        height: auto;
+        min-height: 100vh;
+        overflow: auto;
+      }
+      #app-shell {
+        grid-template-columns: 1fr;
+        padding: 0.75rem;
+        overflow: visible;
+      }
+      .side-rail {
+        overflow: visible;
+      }
+      #chat-column {
+        min-height: 62vh;
+      }
+      #task-details,
+      #audit-details,
+      #grants-details {
+        min-height: 0;
+        flex: initial;
+      }
+    }
+
     @media (max-width: 600px) {
       .message { max-width: 92%; font-size: 0.9rem; }
-      #input-area { padding: 0.5rem; }
+      #app-shell { padding: 0.5rem; gap: 0.75rem; }
+      #input-area { padding: 0.75rem; }
+      .side-panel > summary { padding: 0.75rem 0.85rem; }
+      .side-panel-body { padding: 0.75rem 0.85rem 0.9rem; }
+    }
+
+    /* Workspace drawer */
+    body.layout-workspace #app-shell {
+      display: block;
+      grid-template-columns: none;
+      padding: 1rem 1rem 1.25rem;
+      overflow: visible;
+    }
+
+    body.layout-workspace #chat-column {
+      width: min(100%, 980px);
+      max-width: 980px;
+      height: calc(100vh - 7.75rem);
+      min-height: calc(100vh - 7.75rem);
+      max-height: calc(100vh - 7.75rem);
+      margin: 0 auto;
+    }
+
+    #workspace-dock {
+      position: fixed;
+      right: 1rem;
+      top: 50%;
+      transform: translateY(-50%);
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      padding: 0.55rem;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 26px;
+      background: linear-gradient(180deg, rgba(17,24,39,0.82), rgba(15,23,42,0.92));
+      backdrop-filter: blur(18px);
+      box-shadow: 0 20px 42px rgba(0,0,0,0.28);
+      z-index: 90;
+    }
+
+    .workspace-dock-btn {
+      position: relative;
+      width: 3.9rem;
+      min-height: 4.2rem;
+      padding: 0.65rem 0.45rem 0.6rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.32rem;
+      border: 1px solid transparent;
+      border-radius: 18px;
+      background: transparent;
+      color: #94a3b8;
+      cursor: pointer;
+      font-size: 0.76rem;
+      line-height: 1.1;
+      letter-spacing: 0.02em;
+      transition: all 0.2s ease;
+    }
+
+    .workspace-dock-icon {
+      width: 2.1rem;
+      height: 2.1rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      background: radial-gradient(circle at top, rgba(96,165,250,0.22), rgba(15,23,42,0.2));
+      color: #cbd5f5;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06);
+    }
+
+    .workspace-dock-icon svg {
+      width: 1.1rem;
+      height: 1.1rem;
+      stroke: currentColor;
+    }
+
+    .workspace-dock-label {
+      font-size: 0.74rem;
+      font-weight: 600;
+      color: inherit;
+    }
+
+    .workspace-dock-btn::after {
+      content: attr(data-tip);
+      position: absolute;
+      right: calc(100% + 0.65rem);
+      top: 50%;
+      transform: translateY(-50%) translateX(6px);
+      opacity: 0;
+      pointer-events: none;
+      white-space: nowrap;
+      padding: 0.4rem 0.6rem;
+      border-radius: 10px;
+      background: rgba(15,23,42,0.95);
+      border: 1px solid rgba(255,255,255,0.08);
+      color: var(--text);
+      font-size: 0.75rem;
+      box-shadow: 0 10px 20px rgba(0,0,0,0.22);
+      transition: opacity 0.16s ease, transform 0.16s ease;
+    }
+
+    .workspace-dock-btn:hover,
+    .workspace-dock-btn.active {
+      color: var(--text);
+      border-color: rgba(96,165,250,0.28);
+      background: linear-gradient(180deg, rgba(30,64,175,0.28), rgba(15,23,42,0.5));
+      transform: translateX(-3px);
+    }
+
+    .workspace-dock-btn:hover::after,
+    .workspace-dock-btn.active::after {
+      opacity: 1;
+      transform: translateY(-50%) translateX(0);
+    }
+
+    .workspace-dock-btn.active .workspace-dock-icon {
+      background: linear-gradient(180deg, rgba(59,130,246,0.32), rgba(37,99,235,0.16));
+      color: #eff6ff;
+      box-shadow: inset 0 0 0 1px rgba(147,197,253,0.22);
+    }
+
+    #workspace-backdrop {
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(circle at right center, rgba(59,130,246,0.08), transparent 26%),
+        rgba(3,7,18,0.18);
+      backdrop-filter: blur(2px);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.22s ease;
+      z-index: 84;
+    }
+
+    body.workspace-open #workspace-backdrop {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    #workspace-drawer {
+      position: fixed;
+      top: 5.3rem;
+      right: 1rem;
+      bottom: 1rem;
+      width: min(380px, calc(100vw - 2rem));
+      display: flex;
+      flex-direction: column;
+      background: linear-gradient(180deg, rgba(15,23,42,0.97), rgba(20,20,32,0.98));
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 20px;
+      box-shadow: 0 22px 48px rgba(0,0,0,0.32);
+      backdrop-filter: blur(18px);
+      overflow: hidden;
+      transform: translateX(calc(100% + 1rem));
+      opacity: 0;
+      pointer-events: none;
+      transition: transform 0.22s ease, opacity 0.22s ease;
+      z-index: 89;
+    }
+
+    body.workspace-open #workspace-drawer {
+      transform: translateX(0);
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .workspace-drawer-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 0.75rem;
+      padding: 1.05rem 1.05rem 0.95rem;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015));
+    }
+
+    .workspace-title {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .workspace-subtitle {
+      margin-top: 0.3rem;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    .workspace-close {
+      width: 2rem;
+      height: 2rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 999px;
+      background: rgba(255,255,255,0.02);
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 1rem;
+      line-height: 1;
+      transition: all 0.18s ease;
+    }
+
+    .workspace-close:hover {
+      color: var(--text);
+      border-color: rgba(148,163,184,0.4);
+      background: rgba(255,255,255,0.05);
+    }
+
+    .workspace-drawer-body {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      padding: 0.9rem 1rem 1rem;
+    }
+
+    .workspace-drawer-body::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .workspace-drawer-body::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 999px;
+    }
+
+    .workspace-section {
+      min-height: 100%;
+      background: transparent;
+      border: none;
+      border-radius: 0;
+      overflow: visible;
+    }
+
+    .workspace-section[hidden] {
+      display: none !important;
+    }
+
+    .workspace-section > summary {
+      display: none;
+    }
+
+    .workspace-section .side-panel-body {
+      padding: 0;
+      overflow: visible;
+    }
+
+    .workspace-settings-note {
+      margin-bottom: 0.9rem;
+      padding: 0.75rem 0.8rem;
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 12px;
+      background: rgba(255,255,255,0.02);
+      color: var(--text-muted);
+      line-height: 1.65;
+      font-size: 0.8rem;
+    }
+
+    .workspace-settings-form {
+      display: flex;
+      flex-direction: column;
+      gap: 0.95rem;
+    }
+
+    .workspace-settings-field {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+
+    .workspace-settings-field label {
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .workspace-settings-field small {
+      color: var(--text-muted);
+      line-height: 1.55;
+    }
+
+    .workspace-settings-field textarea {
+      width: 100%;
+      min-height: 118px;
+      padding: 0.75rem 0.85rem;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 12px;
+      background: rgba(15,23,42,0.72);
+      color: var(--text);
+      font-size: 0.86rem;
+      line-height: 1.65;
+      font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', Consolas, monospace;
+      resize: vertical;
+    }
+
+    .workspace-settings-field.primary textarea {
+      min-height: 180px;
+    }
+
+
+    .workspace-settings-advanced {
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 12px;
+      background: rgba(255,255,255,0.02);
+      padding: 0.2rem 0.75rem 0.8rem;
+    }
+
+    .workspace-settings-advanced > summary {
+      cursor: pointer;
+      list-style: none;
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--text);
+      padding: 0.7rem 0;
+    }
+
+    .workspace-settings-advanced > summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .workspace-settings-advanced > summary::after {
+      content: '展开';
+      float: right;
+      color: var(--text-muted);
+      font-size: 0.78rem;
+      font-weight: 500;
+    }
+
+    .workspace-settings-advanced[open] > summary::after {
+      content: '收起';
+    }
+
+    .workspace-settings-advanced .workspace-settings-field + .workspace-settings-field {
+      margin-top: 0.9rem;
+    }
+    .workspace-settings-field textarea:focus {
+      outline: none;
+      border-color: rgba(96,165,250,0.45);
+      box-shadow: 0 0 0 3px rgba(59,130,246,0.12);
+    }
+
+    .workspace-settings-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.8rem;
+      margin-top: 0.25rem;
+    }
+
+    .workspace-settings-status {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    .workspace-settings-save {
+      padding: 0.65rem 1rem;
+      border: 1px solid rgba(96,165,250,0.22);
+      border-radius: 999px;
+      background: linear-gradient(180deg, rgba(37,99,235,0.9), rgba(29,78,216,0.78));
+      color: white;
+      cursor: pointer;
+      font-size: 0.84rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .workspace-settings-save:disabled {
+      opacity: 0.55;
+      cursor: wait;
+    }
+
+    @media (max-width: 1180px) {
+      body.layout-workspace {
+        height: auto;
+        min-height: 100vh;
+        overflow: auto;
+      }
+      body.layout-workspace #app-shell {
+        padding: 0.75rem;
+      }
+      body.layout-workspace #chat-column {
+        width: 100%;
+        max-width: none;
+        min-height: 62vh;
+      }
+      #workspace-dock {
+        top: auto;
+        right: 0.75rem;
+        bottom: 1rem;
+        transform: none;
+        flex-direction: row;
+        padding: 0.45rem;
+      }
+      .workspace-dock-btn {
+        min-width: auto;
+        min-height: 3.8rem;
+        padding: 0.6rem 0.75rem;
+      }
+      .workspace-dock-btn:hover,
+      .workspace-dock-btn.active {
+        transform: translateY(-2px);
+      }
+      #workspace-drawer {
+        top: auto;
+        right: 0.75rem;
+        left: 0.75rem;
+        bottom: 5rem;
+        width: auto;
+      }
+    }
+
+    @media (max-width: 600px) {
+      #workspace-dock {
+        left: 50%;
+        right: auto;
+        transform: translateX(-50%);
+      }
+      #workspace-drawer {
+        left: 0.5rem;
+        right: 0.5rem;
+        bottom: 4.6rem;
+      }
     }
   </style>
 </head>
-<body>
+<body class="layout-workspace">
   <div id="sessions-overlay"></div>
   <div id="sessions-sidebar">
     <div id="sessions-sidebar-header">
@@ -468,31 +1009,135 @@
       <div class="subtitle">你的私人 AI 助手</div>
     </div>
   </header>
-  <div id="status">连接中...</div>
-  <div id="messages">
-    <div class="welcome">
-      <div class="emoji">🦀</div>
-      <h2>你好！我是 CrabCrush</h2>
-      <p>做你的虾兵蟹将 —— 随时为你服务<br>输入消息开始对话吧</p>
+  <div id="app-shell">
+    <main id="chat-column">
+      <div id="status">连接中...</div>
+      <div id="messages">
+        <div class="welcome">
+          <div class="emoji">🦀</div>
+          <h2>你好！我是 CrabCrush</h2>
+          <p>做你的虾兵蟹将 —— 随时为你服务<br>输入消息开始对话吧</p>
+        </div>
+      </div>
+      <div id="input-area" class="">
+        <textarea id="input" placeholder="输入消息... (Enter 发送, Shift+Enter 换行, Esc 停止)" rows="1"></textarea>
+        <button id="send" class="action-btn" disabled>发送</button>
+        <button id="stop-btn" class="action-btn inactive" title="生成时可点击立即停止">停止</button>
+      </div>
+    </main>
+  </div>
+  <div id="workspace-backdrop" aria-hidden="true"></div>
+  <div id="workspace-dock" aria-label="执行工作台入口">
+    <button class="workspace-dock-btn" data-workspace-tab="task" data-tip="当前任务" type="button" title="当前任务" aria-label="当前任务">
+      <span class="workspace-dock-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="5" y="4" width="14" height="16" rx="3"></rect>
+          <path d="M9 4.5h6"></path>
+          <path d="M8 10h8"></path>
+          <path d="M8 14h8"></path>
+          <path d="M8 18h5"></path>
+        </svg>
+      </span>
+      <span class="workspace-dock-label">任务</span>
+    </button>
+    <button class="workspace-dock-btn" data-workspace-tab="audit" data-tip="审计回放" type="button" title="审计回放" aria-label="审计回放">
+      <span class="workspace-dock-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M8 4h7l4 4v10a2 2 0 0 1-2 2H8a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3z"></path>
+          <path d="M15 4v4h4"></path>
+          <path d="M9 11h6"></path>
+          <path d="M9 15h6"></path>
+        </svg>
+      </span>
+      <span class="workspace-dock-label">审计</span>
+    </button>
+    <button class="workspace-dock-btn" data-workspace-tab="grants" data-tip="持久授权记录" type="button" title="持久授权记录" aria-label="持久授权记录">
+      <span class="workspace-dock-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 3l7 3v5c0 4.5-2.9 7.8-7 10-4.1-2.2-7-5.5-7-10V6l7-3z"></path>
+          <rect x="9" y="10.5" width="6" height="5.5" rx="1.4"></rect>
+          <path d="M10.5 10.5V9.3a1.5 1.5 0 1 1 3 0v1.2"></path>
+        </svg>
+      </span>
+      <span class="workspace-dock-label">授权</span>
+    </button>
+    <button class="workspace-dock-btn" data-workspace-tab="workspace" data-tip="工作区设置" type="button" title="工作区设置" aria-label="工作区设置">
+      <span class="workspace-dock-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.6 1.6 0 0 0 .32 1.76l.05.05a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.05-.05A1.6 1.6 0 0 0 15 19.4a1.6 1.6 0 0 0-1 .6 1.6 1.6 0 0 1-2 0 1.6 1.6 0 0 0-1-.6 1.6 1.6 0 0 0-1.76.32l-.05.05a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.05-.05A1.6 1.6 0 0 0 4.6 15a1.6 1.6 0 0 0-.6-1 1.6 1.6 0 0 1 0-2 1.6 1.6 0 0 0 .6-1 1.6 1.6 0 0 0-.32-1.76l-.05-.05a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.05.05A1.6 1.6 0 0 0 9 4.6a1.6 1.6 0 0 0 1-.6 1.6 1.6 0 0 1 2 0 1.6 1.6 0 0 0 1 .6 1.6 1.6 0 0 0 1.76-.32l.05-.05a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.05.05A1.6 1.6 0 0 0 19.4 9c0 .38.14.74.4 1a1.6 1.6 0 0 1 0 2c-.26.26-.4.62-.4 1Z"></path>
+        </svg>
+      </span>
+      <span class="workspace-dock-label">设置</span>
+    </button>
+  </div>
+  <aside id="workspace-drawer" aria-label="执行工作台">
+    <div class="workspace-drawer-header">
+      <div>
+        <div id="workspace-title" class="workspace-title">当前任务</div>
+        <div id="workspace-subtitle" class="workspace-subtitle">查看执行步骤、状态与授权上下文。</div>
+      </div>
+      <button id="workspace-close" class="workspace-close" type="button" title="关闭工作台" aria-label="关闭工作台">×</button>
     </div>
-  </div>
-  <details id="task-details" open style="margin:0 1rem 0.75rem;padding:0.75rem 0.9rem;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:10px">
-    <summary style="cursor:pointer;font-size:0.9rem;color:var(--text-muted)">当前任务</summary>
-    <div id="task-panel" style="margin-top:0.75rem;font-size:0.82rem;color:var(--text-muted)">当前暂无进行中的任务。</div>
-  </details>
-  <details id="audit-details" style="margin:0 1rem 0.75rem;padding:0.75rem 0.9rem;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:10px">
-    <summary style="cursor:pointer;font-size:0.9rem;color:var(--text-muted)">审计回放</summary>
-    <div id="audit-timeline" style="margin-top:0.75rem;font-size:0.82rem;color:var(--text-muted)">当前会话暂无可回放的执行审计。</div>
-  </details>
-  <details id="grants-details" style="margin:0 1rem 0.75rem;padding:0.75rem 0.9rem;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:10px">
-    <summary style="cursor:pointer;font-size:0.9rem;color:var(--text-muted)">持久授权记录</summary>
-    <div id="grants-panel" style="margin-top:0.75rem;font-size:0.82rem;color:var(--text-muted)">当前暂无持久授权记录。</div>
-  </details>
-  <div id="input-area" class="">
-    <textarea id="input" placeholder="输入消息... (Enter 发送, Shift+Enter 换行, Esc 停止)" rows="1"></textarea>
-    <button id="send" class="action-btn" disabled>发送</button>
-    <button id="stop-btn" class="action-btn inactive" title="生成时可点击立即停止">停止</button>
-  </div>
+    <div class="workspace-drawer-body">
+      <details id="task-details" class="workspace-section side-panel" open>
+        <summary>当前任务</summary>
+        <div class="side-panel-body">
+          <div id="task-panel">当前暂无进行中的任务。</div>
+        </div>
+      </details>
+      <details id="audit-details" class="workspace-section side-panel" open hidden>
+        <summary>审计回放</summary>
+        <div class="side-panel-body">
+          <div id="audit-timeline">当前会话暂无可回放的执行审计。</div>
+        </div>
+      </details>
+      <details id="grants-details" class="workspace-section side-panel" open hidden>
+        <summary>持久授权记录</summary>
+        <div class="side-panel-body">
+          <div id="grants-panel">当前暂无持久授权记录。</div>
+        </div>
+      </details>
+      <details id="workspace-settings-details" class="workspace-section side-panel" open hidden>
+        <summary>工作区设置</summary>
+        <div class="side-panel-body">
+          <div class="workspace-settings-note">
+            默认只需要维护 <code>AGENT.md</code>。首次启动会自动创建默认内容；<code>USER.md</code>、<code>IDENTITY.md</code>、<code>SOUL.md</code> 属于按需填写的高级补充。
+          </div>
+          <div id="workspace-settings-status" class="workspace-settings-status">点击保存后会立即写入本地工作区文件。</div>
+          <div class="workspace-settings-form">
+            <div class="workspace-settings-field primary">
+              <label for="workspace-agent-input">AGENT.md</label>
+              <small>主入口，也是默认唯一需要长期维护的文件。这里直接编辑实际生效的 <code>AGENT.md</code> 内容。</small>
+              <textarea id="workspace-agent-input" placeholder="这里直接编辑实际的 AGENT.md 内容。"></textarea>
+            </div>
+            <details class="workspace-settings-advanced">
+              <summary>高级补充（可选）</summary>
+              <div class="workspace-settings-field">
+                <label for="workspace-user-input">USER.md</label>
+                <small>你是谁。名字、称呼、时区、背景信息、在乎的事。</small>
+                <textarea id="workspace-user-input" placeholder="按需填写你的长期信息。"></textarea>
+              </div>
+              <div class="workspace-settings-field">
+                <label for="workspace-identity-input">IDENTITY.md</label>
+                <small>AI 是谁。名字、语气、风格、emoji。</small>
+                <textarea id="workspace-identity-input" placeholder="按需补充 AI 的身份和风格。"></textarea>
+              </div>
+              <div class="workspace-settings-field">
+                <label for="workspace-soul-input">SOUL.md</label>
+                <small>边界与偏好。哪些事必须坚持，哪些风格要避免。</small>
+                <textarea id="workspace-soul-input" placeholder="按需补充边界和偏好。"></textarea>
+              </div>
+            </details>
+            <div class="workspace-settings-actions">
+              <div class="workspace-settings-status" id="workspace-settings-hint">默认先维护 AGENT.md；只有确实需要时再补充高级项。</div>
+              <button id="workspace-save-btn" class="workspace-settings-save" type="button">保存工作区设置</button>
+            </div>
+          </div>
+        </div>
+      </details>
+    </div>
+  </aside>
 
   <div id="confirm-overlay" class="confirm-overlay">
     <div class="confirm-modal">
@@ -676,9 +1321,9 @@
       clearTaskStates('当前暂无进行中的任务。');
       lastAuditEvents = [];
       if (auditTimeline) auditTimeline.innerHTML = '<div style="color:var(--text-muted)">当前会话暂无可回放的执行审计。</div>';
-      if (auditDetails) auditDetails.open = false;
+      if (auditDetails) auditDetails.open = true;
       if (grantsPanel) grantsPanel.innerHTML = '<div style="color:var(--text-muted)">当前暂无持久授权记录。</div>';
-      if (grantsDetails) grantsDetails.open = false;
+      if (grantsDetails) grantsDetails.open = true;
       welcomeShown = true;
       // 通知服务端重置 sessionId，否则下一条消息会发到旧会话
       if (ws && ws.readyState === 1) {
@@ -691,6 +1336,11 @@
     // ── DOM 元素 ──
     const messagesEl = document.getElementById('messages');
     const inputEl = document.getElementById('input');
+    const workspaceBackdrop = document.getElementById('workspace-backdrop');
+    const workspaceTitle = document.getElementById('workspace-title');
+    const workspaceSubtitle = document.getElementById('workspace-subtitle');
+    const workspaceCloseBtn = document.getElementById('workspace-close');
+    const workspaceTabButtons = Array.from(document.querySelectorAll('[data-workspace-tab]'));
     const sendBtn = document.getElementById('send');
     const stopBtn = document.getElementById('stop-btn');
     const statusEl = document.getElementById('status');
@@ -711,6 +1361,14 @@
     const auditTimeline = document.getElementById('audit-timeline');
     const grantsDetails = document.getElementById('grants-details');
     const grantsPanel = document.getElementById('grants-panel');
+    const workspaceSettingsDetails = document.getElementById('workspace-settings-details');
+    const workspaceSettingsStatus = document.getElementById('workspace-settings-status');
+    const workspaceSettingsHint = document.getElementById('workspace-settings-hint');
+    const workspaceAgentInput = document.getElementById('workspace-agent-input');
+    const workspaceUserInput = document.getElementById('workspace-user-input');
+    const workspaceIdentityInput = document.getElementById('workspace-identity-input');
+    const workspaceSoulInput = document.getElementById('workspace-soul-input');
+    const workspaceSaveBtn = document.getElementById('workspace-save-btn');
     const confirmAllowOnceBtn = document.getElementById('confirm-allow-once');
     const confirmAllowSessionBtn = document.getElementById('confirm-allow-session');
     const confirmAllowPersistentBtn = document.getElementById('confirm-allow-persistent');
@@ -731,7 +1389,49 @@
     const taskStates = new Map();
     let currentTaskOperationId = null;
     let lastAuditEvents = [];
+    const workspacePanelMeta = {
+      task: { title: '当前任务', subtitle: '查看执行步骤、状态与授权上下文。' },
+      audit: { title: '审计回放', subtitle: '按时间查看本会话的执行轨迹。' },
+      grants: { title: '持久授权记录', subtitle: '查看与撤销当前主体下的长期授权。' },
+      workspace: { title: '工作区设置', subtitle: '直接编辑 AGENT.md、USER.md、IDENTITY.md、SOUL.md。' },
+    };
+    let activeWorkspaceTab = 'task';
 
+    function syncWorkspaceDrawer() {
+      const isOpen = document.body.classList.contains('workspace-open');
+      const meta = workspacePanelMeta[activeWorkspaceTab] || workspacePanelMeta.task;
+      if (workspaceTitle) workspaceTitle.textContent = meta.title;
+      if (workspaceSubtitle) workspaceSubtitle.textContent = meta.subtitle;
+      if (taskDetails) taskDetails.hidden = activeWorkspaceTab !== 'task';
+      if (auditDetails) auditDetails.hidden = activeWorkspaceTab !== 'audit';
+      if (grantsDetails) grantsDetails.hidden = activeWorkspaceTab !== 'grants';
+      if (workspaceSettingsDetails) workspaceSettingsDetails.hidden = activeWorkspaceTab !== 'workspace';
+      for (const button of workspaceTabButtons) {
+        const active = isOpen && button.dataset.workspaceTab === activeWorkspaceTab;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-pressed', active ? 'true' : 'false');
+      }
+    }
+
+    function openWorkspace(tab = activeWorkspaceTab) {
+      activeWorkspaceTab = tab;
+      document.body.classList.add('workspace-open');
+      syncWorkspaceDrawer();
+      if (tab === 'workspace') void loadWorkspaceSettings();
+    }
+
+    function closeWorkspace() {
+      document.body.classList.remove('workspace-open');
+      syncWorkspaceDrawer();
+    }
+
+    function toggleWorkspace(tab) {
+      if (document.body.classList.contains('workspace-open') && activeWorkspaceTab === tab) {
+        closeWorkspace();
+        return;
+      }
+      openWorkspace(tab);
+    }
     const taskStatusLabels = {
       planning: '准备中',
       waiting_confirm: '等待确认',
@@ -794,6 +1494,70 @@
       currentTaskOperationId = null;
       if (taskPanel) taskPanel.innerHTML = `<div style="color:var(--text-muted)">${escapeHtml(message)}</div>`;
       if (taskDetails) taskDetails.open = true;
+    }
+
+    function buildApiUrl(path) {
+      const url = new URL(path, location.origin);
+      const token = urlParamsInit.get('token');
+      if (token) url.searchParams.set('token', token);
+      return url.toString();
+    }
+
+    function setWorkspaceSettingsStatus(message, tone = 'muted') {
+      if (!workspaceSettingsStatus) return;
+      workspaceSettingsStatus.textContent = message;
+      if (tone === 'success') workspaceSettingsStatus.style.color = '#4ade80';
+      else if (tone === 'error') workspaceSettingsStatus.style.color = '#f87171';
+      else if (tone === 'loading') workspaceSettingsStatus.style.color = '#60a5fa';
+      else workspaceSettingsStatus.style.color = 'var(--text-muted)';
+    }
+
+    function applyWorkspaceSettings(workspace) {
+      if (workspaceAgentInput) workspaceAgentInput.value = typeof workspace?.agent === 'string' ? workspace.agent : '';
+      if (workspaceUserInput) workspaceUserInput.value = typeof workspace?.user === 'string' ? workspace.user : '';
+      if (workspaceIdentityInput) workspaceIdentityInput.value = typeof workspace?.identity === 'string' ? workspace.identity : '';
+      if (workspaceSoulInput) workspaceSoulInput.value = typeof workspace?.soul === 'string' ? workspace.soul : '';
+    }
+
+    async function loadWorkspaceSettings() {
+      if (!workspaceAgentInput) return;
+      setWorkspaceSettingsStatus('正在加载工作区设置...','loading');
+      try {
+        const response = await fetch(buildApiUrl('/api/workspace'));
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        applyWorkspaceSettings(data.workspace || {});
+        setWorkspaceSettingsStatus('已加载本地工作区文件。','muted');
+      } catch (error) {
+        setWorkspaceSettingsStatus(`加载失败：${error instanceof Error ? error.message : '未知错误'}`,'error');
+      }
+    }
+
+    async function saveWorkspaceSettings() {
+      if (!workspaceSaveBtn) return;
+      workspaceSaveBtn.disabled = true;
+      setWorkspaceSettingsStatus('正在保存工作区设置...','loading');
+      try {
+        const response = await fetch(buildApiUrl('/api/workspace'), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            agent: workspaceAgentInput ? workspaceAgentInput.value : '',
+            user: workspaceUserInput ? workspaceUserInput.value : '',
+            identity: workspaceIdentityInput ? workspaceIdentityInput.value : '',
+            soul: workspaceSoulInput ? workspaceSoulInput.value : '',
+          }),
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        applyWorkspaceSettings(data.workspace || {});
+        setWorkspaceSettingsStatus('已保存到本地 workspace/ 下的 4 个文件。','success');
+        if (workspaceSettingsHint) workspaceSettingsHint.textContent = '保存成功。后续对话会自动使用这些设置。';
+      } catch (error) {
+        setWorkspaceSettingsStatus(`保存失败：${error instanceof Error ? error.message : '未知错误'}`,'error');
+      } finally {
+        workspaceSaveBtn.disabled = false;
+      }
     }
 
     function ensureTaskStep(task, stepIndex, name) {
@@ -1695,6 +2459,7 @@
       });
     }
     window.copyCode = copyCode;
+    syncWorkspaceDrawer();
 
     // ── 事件绑定 ──
     sendBtn.addEventListener('click', send);
@@ -1708,6 +2473,12 @@
         if (e.target === confirmOverlay) resolveConfirm(false);
       });
     }
+    if (workspaceBackdrop) workspaceBackdrop.addEventListener('click', closeWorkspace);
+    if (workspaceCloseBtn) workspaceCloseBtn.addEventListener('click', closeWorkspace);
+    workspaceTabButtons.forEach((button) => {
+      button.addEventListener('click', () => toggleWorkspace(button.dataset.workspaceTab || 'task'));
+    });
+    if (workspaceSaveBtn) workspaceSaveBtn.addEventListener('click', saveWorkspaceSettings);
     document.getElementById('sessions-btn').addEventListener('click', openSessionsSidebar);
     document.getElementById('sessions-close').addEventListener('click', closeSessionsSidebar);
     document.getElementById('sessions-new').addEventListener('click', newSession);
@@ -1728,6 +2499,11 @@
       if (e.key === 'Escape' && isStreaming) {
         e.preventDefault();
         stopGeneration();
+        return;
+      }
+      if (e.key === 'Escape' && document.body.classList.contains('workspace-open') && !(confirmOverlay && confirmOverlay.classList.contains('visible'))) {
+        e.preventDefault();
+        closeWorkspace();
       }
     });
 
@@ -1747,8 +2523,4 @@
   </script>
 </body>
 </html>
-
-
-
-
 

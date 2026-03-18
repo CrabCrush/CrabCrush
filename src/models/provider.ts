@@ -275,7 +275,8 @@ export class OpenAICompatibleProvider {
                     arguments: '',
                   });
                 }
-                const pending = pendingToolCalls.get(idx)!;
+                const pending = pendingToolCalls.get(idx);
+                if (!pending) continue;
                 if (tc.id) pending.id = tc.id;
                 if (tc.function?.name) pending.name = tc.function.name;
                 if (tc.function?.arguments) pending.arguments += tc.function.arguments;

@@ -1,7 +1,5 @@
 import { z } from 'zod';
-
-const DEFAULT_SYSTEM_PROMPT =   '你是 CrabCrush，一个友好的 AI 助手。请用中文回复。\n' +  '调用工具后，必须用自然语言向用户总结结果并给出建议，不要只引用工具输出或让用户自己去操作。\n' +  '如果工具执行失败或未执行，不要声称已经完成。';
-
+import { DEFAULT_SYSTEM_PROMPT } from '../prompts/defaults.js';
 /**
  * 已知模型提供商的默认配置
  * 用户只需提供 apiKey，baseURL 自动填充
@@ -65,6 +63,10 @@ const authSchema = z.object({
   token: z.string().optional(),
 }).default({});
 
+const promptsSchema = z.object({
+  /** Prompt 覆盖目录；不设则运行时按默认路径和环境变量搜索 */
+  dir: z.string().optional(),
+}).default({});
 // 主配置
 export const configSchema = z.object({
   port: z.number().int().min(1).max(65535).default(18790),
@@ -93,6 +95,9 @@ export const configSchema = z.object({
 
   /** Owner 用户 ID（只有 owner 能触发本地操作类工具，详见 DEC-026） */
   ownerIds: z.array(z.string()).default([]),
+
+  /** Prompt 相关配置 */
+  prompts: promptsSchema,
 
   /** 工具相关配置 */
   tools: z.object({

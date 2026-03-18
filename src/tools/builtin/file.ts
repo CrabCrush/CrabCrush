@@ -20,6 +20,9 @@ import type {
   ToolResult,
 } from '../types.js';
 import { hasWriteFileIntent } from '../intent.js';
+import { createDefaultPromptRegistry } from '../../prompts/defaults.js';
+import type { PromptRegistry } from '../../prompts/types.js';
+import { WORKSPACE_DIR, WORKSPACE_FILES } from '../../workspace/index.js';
 
 const DEFAULT_MAX_CHARS = 8000;
 
@@ -59,6 +62,21 @@ function getDirectoryGrantKey(action: 'read_file' | 'write_file', fullPath: stri
 
 function getListGrantKey(fullPath: string): string {
   return `file:list:${fullPath}`;
+}
+
+function getFileToolPrompts(prompts?: PromptRegistry): PromptRegistry['tools']['file'] {
+  return (prompts ?? createDefaultPromptRegistry()).tools.file;
+}
+
+const RESERVED_WORKSPACE_ROOT_FILES = new Set<string>(Object.values(WORKSPACE_FILES).map((name) => name.toLowerCase()));
+
+function getReservedWorkspacePathError(pathArg: string): string | null {
+  const normalized = pathArg.trim().replace(/^[/\\]+/, '').replace(/\\/g, '/');
+  if (!normalized || normalized.startsWith(`${WORKSPACE_DIR}/`) || normalized.includes('/')) return null;
+  const filename = normalized.toLowerCase();
+  if (!RESERVED_WORKSPACE_ROOT_FILES.has(filename)) return null;
+  const canonical = Object.values(WORKSPACE_FILES).find((name) => name.toLowerCase() === filename) ?? normalized;
+  return `工作区保留文件 ${canonical} 必须写入 ${WORKSPACE_DIR}/ 下。请改用 ${WORKSPACE_DIR}/${canonical}`;
 }
 
 /** 仅当 path 为绝对路径（fileBase 外）时使用；支持 persistent，选「永久允许」后同路径/同目录不再弹窗 */
@@ -117,21 +135,23 @@ export function getFileBasePath(config?: { fileBase?: string }): string {
  * 创建 read_file 工具（支持配置根目录）
  * 根目录在每次 execute 时解析，以支持运行时环境变量（如测试中设置 CRABCRUSH_FILE_BASE）
  */
-export function createReadFileTool(config?: { fileBase?: string }): Tool {
+export function createReadFileTool(config?: { fileBase?: string }, prompts?: PromptRegistry): Tool {
+  const filePrompts = getFileToolPrompts(prompts);
+
   return {
     definition: {
       name: 'read_file',
-      description: '读取本地文件内容。当用户提供文件路径、询问文件内容、要求总结某文档时调用。仅可读取配置的根目录下的文件（默认 ~/.crabcrush，可通过 tools.fileBase 或 CRABCRUSH_FILE_BASE 修改）。',
+      description: filePrompts.read_file.description,
       parameters: {
         type: 'object',
         properties: {
           path: {
             type: 'string',
-            description: '相对于根目录（默认 ~/.crabcrush，可配置 tools.fileBase）的文件路径，如 workspace/notes.md；也支持绝对路径（需要运行时权限确认）。',
+            description: filePrompts.read_file.parameters.path,
           },
           maxChars: {
             type: 'number',
-            description: '返回内容的最大字符数，默认 8000',
+            description: filePrompts.read_file.parameters.maxChars,
             default: DEFAULT_MAX_CHARS,
           },
         },
@@ -236,29 +256,30 @@ function matchPattern(name: string, pattern: string): boolean {
  * 创建 list_files 工具（列出/查找文件）
  * 与 read_file 共用根目录配置，先 list_files 查找再用 read_file 读取
  */
-export function createListFilesTool(config?: { fileBase?: string }): Tool {
+export function createListFilesTool(config?: { fileBase?: string }, prompts?: PromptRegistry): Tool {
   const MAX_RESULTS = 50;
   const MAX_DEPTH = 3;
+  const filePrompts = getFileToolPrompts(prompts);
 
   return {
     definition: {
       name: 'list_files',
-      description: '列出或查找目录下的文件。当用户说「帮我找一下」「有哪些文件」「列出 XXX 目录」时先调用此工具查找，再用 read_file 读取具体文件。支持按名称模式过滤（如 *.md 找所有 Markdown）。',
+      description: filePrompts.list_files.description,
       parameters: {
         type: 'object',
         properties: {
           path: {
             type: 'string',
-            description: '相对于根目录的目录路径（如 workspace 或 .）；也支持绝对路径（需要运行时权限确认）。',
+            description: filePrompts.list_files.parameters.path,
             default: '.',
           },
           pattern: {
             type: 'string',
-            description: '可选，文件名过滤模式。如 *.md 找 Markdown，notes* 找以 notes 开头的文件',
+            description: filePrompts.list_files.parameters.pattern,
           },
           recursive: {
             type: 'boolean',
-            description: '是否递归子目录，默认 false',
+            description: filePrompts.list_files.parameters.recursive,
             default: false,
           },
         },
@@ -363,25 +384,27 @@ export const listFilesTool = createListFilesTool();
  * 与 read_file 共用根目录配置，仅允许在 fileBase 下创建/覆盖文件
  * confirmRequired: true（高危操作，待 2a.2 确认机制实现后生效）
  */
-export function createWriteFileTool(config?: { fileBase?: string }): Tool {
+export function createWriteFileTool(config?: { fileBase?: string }, prompts?: PromptRegistry): Tool {
+  const filePrompts = getFileToolPrompts(prompts);
+
   return {
     definition: {
       name: 'write_file',
-      description: '将内容写入本地文件。当用户要求「保存」「写入」「创建文件」「修改/更新现有文件」时调用。仅可写入配置的根目录（fileBase）下。path 始终为相对 fileBase：写工作区人格/笔记请用 workspace/ 前缀（如 workspace/notes.md），否则会写到 fileBase 根下。若目标文件已存在，须设 overwrite=true 并经确认。',
+      description: filePrompts.write_file.description,
       parameters: {
         type: 'object',
         properties: {
           path: {
             type: 'string',
-            description: '相对 fileBase 的路径。工作区文件用 workspace/ 前缀，如 workspace/notes.md；否则写到 fileBase 根下',
+            description: filePrompts.write_file.parameters.path,
           },
           content: {
             type: 'string',
-            description: '要写入的文本内容',
+            description: filePrompts.write_file.parameters.content,
           },
           overwrite: {
             type: 'boolean',
-            description: '是否允许覆盖已存在文件。创建新文件时通常为 false；修改或更新已有文件时必须设为 true。默认 false',
+            description: filePrompts.write_file.parameters.overwrite,
             default: false,
           },
         },
@@ -417,6 +440,8 @@ export function createWriteFileTool(config?: { fileBase?: string }): Tool {
       const overwrite = Boolean(args.overwrite);
 
       if (!pathArg || typeof pathArg !== 'string') return null;
+      const reservedPathError = getReservedWorkspacePathError(pathArg);
+      if (reservedPathError) return { success: false, content: reservedPathError };
       // 这里的意图判断只是防“模型自作主张写文件”的低成本护栏。
       // 长期应更多依赖 plan approval + execution preview + confirm，而不是关键词本身。
       if (context.userMessage && !hasWriteFileIntent(context.userMessage, overwrite)) {
@@ -463,6 +488,11 @@ export function createWriteFileTool(config?: { fileBase?: string }): Tool {
       }
       if (content === undefined || content === null) {
         return { success: false, content: '请提供 content 参数' };
+      }
+
+      const reservedPathError = getReservedWorkspacePathError(pathArg);
+      if (reservedPathError) {
+        return { success: false, content: reservedPathError };
       }
 
       const basePath = getFileBasePath(config);

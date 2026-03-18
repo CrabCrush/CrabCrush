@@ -80,8 +80,9 @@ describe('Cost Estimation', () => {
   it('estimates cost for known models', () => {
     const result = estimateCost('deepseek-chat', 1000, 500);
     expect(result).not.toBeNull();
-    expect(result!.cost).toBeGreaterThan(0);
-    expect(result!.formatted).toMatch(/^¥/);
+    if (!result) throw new Error('expected cost result for deepseek-chat');
+    expect(result.cost).toBeGreaterThan(0);
+    expect(result.formatted).toMatch(/^¥/);
   });
 
   it('returns null for unknown models', () => {
@@ -91,6 +92,7 @@ describe('Cost Estimation', () => {
 
   it('formats small costs with 4 decimal places', () => {
     const result = estimateCost('deepseek-chat', 100, 50);
-    expect(result!.formatted).toMatch(/^¥0\.000/);
+    if (!result) throw new Error('expected cost result for deepseek-chat');
+    expect(result.formatted).toMatch(/^¥0\.000/);
   });
 });

@@ -15,6 +15,7 @@ import { getBuiltinTools } from './tools/builtin/index.js';
 import { getFileBasePath } from './tools/builtin/file.js';
 import { startGateway } from './gateway/server.js';
 import { createAuditLogger } from './audit/logger.js';
+import { loadPromptRegistry } from './prompts/loader.js';
 import { DingTalkAdapter } from './channels/dingtalk.js';
 import { runDoctor } from './cli/doctor.js';
 import { runOnboard } from './cli/onboard.js';
@@ -77,9 +78,15 @@ program
     const dbPath = join(homedir(), '.crabcrush', 'data', 'conversations.db');
     const store = new ConversationStore(dbPath);
 
+    // 初始化 PromptRegistry（外部 prompts/ 目录覆盖，缺失时回退到内置默认值）
+    const prompts = loadPromptRegistry({
+      promptsDir: config.prompts.dir,
+      defaultSystemBase: config.agent.systemPrompt,
+    });
+
     // 初始化工具系统
     const toolRegistry = new ToolRegistry();
-    for (const tool of getBuiltinTools(config)) {
+    for (const tool of getBuiltinTools(config, prompts)) {
       toolRegistry.register(tool);
     }
 
@@ -126,6 +133,7 @@ program
       ownerIds: config.ownerIds,
       fileBase: getFileBasePath(config.tools),
       auditLogger,
+      prompts,
     });
 
     // 渠道适配器列表

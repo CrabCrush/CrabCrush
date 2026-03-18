@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { configSchema } from '../src/config/schema.js';
 
 describe('Config Schema', () => {
@@ -25,11 +28,15 @@ describe('Config Schema', () => {
         systemPrompt: '你好',
         maxTokens: 2048,
       },
+      prompts: {
+        dir: './prompts',
+      },
     });
     expect(config.port).toBe(3000);
     expect(config.bind).toBe('all');
     expect(config.models.deepseek.apiKey).toBe('sk-test-key');
     expect(config.agent.maxTokens).toBe(2048);
+    expect(config.prompts.dir).toBe('./prompts');
   });
 
   it('rejects invalid port', () => {
@@ -63,5 +70,24 @@ describe('Config Loader', () => {
     // 注意：如果 cwd 有 crabcrush.yaml 会被读取，这里只验证不报错
     const config = loadConfig();
     expect(config.port).toBeDefined();
+  });
+  it('loads prompts.dir from yaml config', async () => {
+    const { loadConfig } = await import('../src/config/loader.js');
+    const dir = mkdtempSync(join(tmpdir(), 'crabcrush-config-'));
+    const configPath = join(dir, 'crabcrush.yaml');
+    writeFileSync(configPath, [
+      'models:',
+      '  deepseek:',
+      '    apiKey: sk-test-key',
+      'prompts:',
+      '  dir: ./custom-prompts',
+    ].join('\n'));
+
+    try {
+      const config = loadConfig(configPath);
+      expect(config.prompts.dir).toBe(join(dir, 'custom-prompts'));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

@@ -7,6 +7,7 @@ import { ToolRegistry } from '../src/tools/registry.js';
 import type { ChatChunk, ChatMessage, ChatOptions } from '../src/models/provider.js';
 import { ConversationStore } from '../src/storage/database.js';
 import type { Tool } from '../src/tools/types.js';
+import { createDefaultPromptRegistry } from '../src/prompts/defaults.js';
 
 class MockRouter {
   private round = 0;
@@ -74,6 +75,13 @@ class MockFileEnforcementRouter {
     }
 
     yield { content: '已通过工具确认 test93.json 不存在。', done: false };
+    yield { content: '', done: true, model: 'mock-model' };
+  }
+}
+
+class MockFilePromptFallbackRouter {
+  async *chat(_messages: ChatMessage[], _options: ChatOptions = {}): AsyncIterable<ChatChunk> {
+    yield { content: '我已经处理好了文件。', done: false };
     yield { content: '', done: true, model: 'mock-model' };
   }
 }
@@ -372,7 +380,7 @@ function createRetryRuntime(): AgentRuntime {
     confirmRequired: true,
     buildConfirmRequest: (args) => ({
       preview: {
-        title: Boolean(args.overwrite) ? '覆盖文件' : '写入文件',
+        title: args.overwrite ? '覆盖文件' : '写入文件',
         summary: '将写入 ' + ((args.path as string) || 'unknown'),
         riskLevel: 'high',
         targets: [String(args.path || '')],
@@ -506,14 +514,14 @@ describe('AgentRuntime tool plan', () => {
   it('does not keep orphan tool_calls messages after plan rejection', async () => {
     const runtime = createRuntime(false);
 
-    for await (const _event of runtime.chat(
+    for await (const event of runtime.chat(
       'sess-reject',
       '请保存到文件',
       undefined,
       'owner-1',
       async (request) => request.kind === 'plan' ? ({ allow: false, scope: 'once' }) : ({ allow: true, scope: 'once' }),
     )) {
-      // consume stream
+      void event;
     }
 
     const session = runtime.getOrCreateSession('sess-reject');
@@ -566,6 +574,104 @@ describe('AgentRuntime tool plan', () => {
     expect(toolCall?.name).toBe('read_file');
   });
 
+  it('uses custom runtime prompts for plan summary and plan approval message', async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      definition: {
+        name: 'write_like',
+        description: 'mock write tool',
+        parameters: { type: 'object', properties: {} },
+      },
+      permission: 'owner',
+      confirmRequired: true,
+      buildConfirmRequest: (args) => ({
+        preview: {
+          title: '写入文件',
+          summary: `将写入 ${(args.path as string) || 'unknown'}`,
+          riskLevel: 'high',
+          targets: [String(args.path || '')],
+        },
+      }),
+      execute: async () => ({ success: true, content: 'write ok' }),
+    } as Tool);
+
+    const prompts = createDefaultPromptRegistry('test');
+    prompts.runtime.planSummarySingle = '自定义单步计划';
+    prompts.runtime.planApprovalMessage = '自定义计划确认';
+
+    const runtime = new AgentRuntime({
+      router: new MockRouter() as never,
+      systemPrompt: 'test',
+      maxTokens: 1024,
+      toolRegistry: registry,
+      ownerIds: ['owner-1'],
+      prompts,
+    });
+
+    const requests: string[] = [];
+    const events: Array<unknown> = [];
+    for await (const event of runtime.chat(
+      'sess-custom-plan',
+      '请保存到文件',
+      undefined,
+      'owner-1',
+      async (request) => {
+        if (request.kind === 'plan' && request.message) requests.push(request.message);
+        return { allow: true, scope: 'once' };
+      },
+    )) {
+      events.push(event);
+    }
+
+    const plan = events.find((event): event is ToolPlanEvent =>
+      typeof event === 'object' && event !== null && 'type' in event && (event as { type: string }).type === 'tool_plan');
+
+    expect(plan?.summary).toBe('自定义单步计划');
+    expect(requests).toEqual(['自定义计划确认']);
+  });
+
+  it('uses custom file-tool fallback message from prompts', async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      definition: {
+        name: 'read_file',
+        description: 'mock read tool',
+        parameters: { type: 'object', properties: {} },
+      },
+      permission: 'owner',
+      confirmRequired: false,
+      execute: async () => ({ success: false, content: '文件不存在：test93.json' }),
+    } as Tool);
+
+    const prompts = createDefaultPromptRegistry('test');
+    prompts.runtime.fileToolRequiredMessage = '自定义文件兜底提示';
+
+    const runtime = new AgentRuntime({
+      router: new MockFilePromptFallbackRouter() as never,
+      systemPrompt: 'test',
+      maxTokens: 1024,
+      toolRegistry: registry,
+      ownerIds: ['owner-1'],
+      prompts,
+    });
+
+    const events: Array<unknown> = [];
+    for await (const event of runtime.chat(
+      'sess-custom-file-required',
+      '帮我找找 test93.json 有没有，没有就创建，有就把内容给我',
+      undefined,
+      'owner-1',
+      async () => ({ allow: true, scope: 'once' }),
+    )) {
+      events.push(event);
+    }
+
+    const fallbackChunk = events.find((event): event is ChatChunk =>
+      typeof event === 'object' && event !== null && 'content' in event && (event as ChatChunk).content === '自定义文件兜底提示');
+
+    expect(fallbackChunk).toBeTruthy();
+  });
+
   it('allows the model to retry write_file with overwrite=true after an initial conflict', async () => {
     const runtime = createRetryRuntime();
     const events: Array<unknown> = [];
@@ -616,14 +722,14 @@ describe('AgentRuntime tool plan', () => {
   it('persists tool plan and plan approval result into conversation history', async () => {
     const { runtime, savedMessages } = createRuntimeWithStore(true);
 
-    for await (const _event of runtime.chat(
+    for await (const event of runtime.chat(
       'sess-3',
       '请保存到文件',
       undefined,
       'owner-1',
       async () => ({ allow: true, scope: 'once' }),
     )) {
-      // consume stream
+      void event;
     }
 
     const planBlock = savedMessages.find((message) => message.content.startsWith('__TOOL_PLAN__\n'));
@@ -638,7 +744,7 @@ describe('AgentRuntime tool plan', () => {
   it('persists channel and sender metadata when creating a conversation', async () => {
     const { runtime, ensuredConversations } = createRuntimeWithStore(false);
 
-    for await (const _event of runtime.chat(
+    for await (const event of runtime.chat(
       'dingtalk-user-1',
       '你好',
       undefined,
@@ -646,7 +752,7 @@ describe('AgentRuntime tool plan', () => {
       async () => ({ allow: true, scope: 'once' }),
       'dingtalk',
     )) {
-      // consume stream
+      void event;
     }
 
     expect(ensuredConversations).toHaveLength(1);
@@ -740,7 +846,7 @@ describe('AgentRuntime tool plan', () => {
     try {
       const firstRuntime = createRuntime();
       const firstRequests: string[] = [];
-      for await (const _event of firstRuntime.chat(
+      for await (const event of firstRuntime.chat(
         'sess-persistent-1',
         '请执行安全操作',
         undefined,
@@ -751,13 +857,13 @@ describe('AgentRuntime tool plan', () => {
         },
         'webchat',
       )) {
-        // consume stream
+        void event;
       }
 
       const secondRuntime = createRuntime();
       const secondRequests: string[] = [];
       const secondEvents: Array<unknown> = [];
-      for await (const _event of secondRuntime.chat(
+      for await (const event of secondRuntime.chat(
         'sess-persistent-2',
         '再执行一次安全操作',
         undefined,
@@ -768,7 +874,7 @@ describe('AgentRuntime tool plan', () => {
         },
         'webchat',
       )) {
-        secondEvents.push(_event);
+        secondEvents.push(event);
       }
 
       expect(firstRequests).toEqual(['plan', 'confirm']);
@@ -850,7 +956,7 @@ describe('AgentRuntime tool plan', () => {
     try {
       const firstRuntime = createRuntime();
       const firstRequests: string[] = [];
-      for await (const _event of firstRuntime.chat(
+      for await (const event of firstRuntime.chat(
         'sess-perm-1',
         '请扫描这个目录',
         undefined,
@@ -861,12 +967,12 @@ describe('AgentRuntime tool plan', () => {
         },
         'webchat',
       )) {
-        // consume stream
+        void event;
       }
 
       const secondRuntime = createRuntime();
       const secondRequests: string[] = [];
-      for await (const _event of secondRuntime.chat(
+      for await (const event of secondRuntime.chat(
         'sess-perm-2',
         '再扫描一次这个目录',
         undefined,
@@ -877,7 +983,7 @@ describe('AgentRuntime tool plan', () => {
         },
         'webchat',
       )) {
-        // consume stream
+        void event;
       }
 
       expect(firstRequests).toEqual(['plan', 'permission_request']);
@@ -1059,7 +1165,7 @@ describe('AgentRuntime tool plan', () => {
       const before = store.listPermissionGrants('webchat:default')[0]?.lastUsedAt ?? 0;
       await new Promise((resolve) => setTimeout(resolve, 10));
 
-      for await (const _event of runtime.chat(
+      for await (const event of runtime.chat(
         'sess-mixed-plan',
         '先检查网页再写入文件',
         undefined,
@@ -1067,7 +1173,7 @@ describe('AgentRuntime tool plan', () => {
         async (request) => request.kind === 'plan' ? ({ allow: false, scope: 'once' }) : ({ allow: true, scope: 'once' }),
         'webchat',
       )) {
-        // consume stream
+        void event;
       }
 
       const after = store.listPermissionGrants('webchat:default')[0]?.lastUsedAt ?? 0;
@@ -1114,7 +1220,7 @@ describe('AgentRuntime tool plan', () => {
 
     try {
       const firstRequests: string[] = [];
-      for await (const _event of runtime.chat(
+      for await (const event of runtime.chat(
         'sess-a',
         '请执行安全操作',
         undefined,
@@ -1125,11 +1231,11 @@ describe('AgentRuntime tool plan', () => {
         },
         'dingtalk',
       )) {
-        // consume stream
+        void event;
       }
 
       const secondRequests: string[] = [];
-      for await (const _event of runtime.chat(
+      for await (const event of runtime.chat(
         'sess-b',
         '请执行安全操作',
         undefined,
@@ -1140,14 +1246,14 @@ describe('AgentRuntime tool plan', () => {
         },
         'dingtalk',
       )) {
-        // consume stream
+        void event;
       }
 
       expect(runtime.revokePermissionGrant('web:example.com', 'dingtalk', 'staff-a')).toBe(true);
       expect(store.hasActivePermissionGrant('dingtalk:staff-a', 'web:example.com')).toBe(false);
 
       const thirdRequests: string[] = [];
-      for await (const _event of runtime.chat(
+      for await (const event of runtime.chat(
         'sess-b',
         '再执行一次安全操作',
         undefined,
@@ -1158,7 +1264,7 @@ describe('AgentRuntime tool plan', () => {
         },
         'dingtalk',
       )) {
-        // consume stream
+        void event;
       }
 
       expect(firstRequests).toEqual(['plan', 'confirm']);

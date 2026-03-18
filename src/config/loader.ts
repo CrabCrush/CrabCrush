@@ -1,5 +1,5 @@
 import { readFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { parse as parseYaml } from 'yaml';
 import { configSchema, KNOWN_PROVIDERS, type CrabCrushConfig } from './schema.js';
@@ -42,6 +42,13 @@ export function loadConfig(configPath?: string): CrabCrushConfig {
   if (path && existsSync(path)) {
     const content = readFileSync(path, 'utf-8');
     rawConfig = (parseYaml(content) as Record<string, unknown>) ?? {};
+    const promptConfig = rawConfig.prompts;
+    if (promptConfig && typeof promptConfig === 'object') {
+      const promptsDir = (promptConfig as { dir?: unknown }).dir;
+      if (typeof promptsDir === 'string' && promptsDir.trim() && !isAbsolute(promptsDir)) {
+        (promptConfig as { dir: string }).dir = resolve(dirname(path), promptsDir);
+      }
+    }
   }
 
   // 环境变量覆盖端口

@@ -18,6 +18,7 @@ import { BlockStreamer } from './block_streaming.js';
 export interface DingTalkConfig {
   clientId: string;
   clientSecret: string;
+  confirmTimeoutMs?: number;
 }
 
 /** 钉钉 API 消息长度限制（字节，保守取字符数） */
@@ -171,7 +172,7 @@ export class DingTalkAdapter implements ChannelAdapter {
           clearTimeout(pending.timeout);
           this.pendingConfirms.delete(pendingId);
           const allow = action === '允许';
-          const decision: ToolConfirmDecision = { allow, scope };
+          const decision: ToolConfirmDecision = { allow, scope, reason: allow ? undefined : 'rejected' };
           pending.resolve(decision);
           await this.sendReply(payload, allow
             ? `已允许执行工具：${pending.name}${
@@ -227,7 +228,7 @@ export class DingTalkAdapter implements ChannelAdapter {
       const toolResults: string[] = [];
       const requestConfirm: ToolConfirmHandler = async ({ name, args, message, preview, defaultScope, scopeOptions }) => {
         const id = `confirm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        const timeoutMs = 60_000;
+        const timeoutMs = this.config.confirmTimeoutMs ?? 60_000;
         const sections = [formatPreview(preview), message ? `说明：${message}` : '', formatArgsSummary(args)].filter(Boolean);
         const lines = [`回复：允许 ${id}`];
         if (scopeOptions?.includes('session')) lines.push(`或：允许 本会话 ${id}`);
@@ -250,7 +251,7 @@ export class DingTalkAdapter implements ChannelAdapter {
           const timeout = setTimeout(() => {
             this.pendingConfirms.delete(id);
             void this.sendReply(payload, `确认超时，已拒绝执行工具：${name}`);
-            resolve({ allow: false, scope: defaultScope ?? 'once' });
+            resolve({ allow: false, scope: defaultScope ?? 'once', reason: 'timeout' });
           }, timeoutMs);
 
           this.pendingConfirms.set(id, { senderId: payload.senderStaffId, resolve, timeout, name });
@@ -260,6 +261,7 @@ export class DingTalkAdapter implements ChannelAdapter {
       try {
         for await (const event of this.chatHandler(sessionId, content, undefined, payload.senderStaffId, requestConfirm)) {
           if ('type' in event && (event as { type: string }).type === 'stream_control') continue;
+          if ('type' in event && (event as { type: string }).type === 'tool_plan_result') continue;
           if ('type' in event && (event as { type: string }).type === 'tool_call') {
             const tc = event as { name: string; result?: string; success?: boolean };
             if (!toolNames.includes(tc.name)) toolNames.push(tc.name);
@@ -364,4 +366,3 @@ export class DingTalkAdapter implements ChannelAdapter {
     }
   }
 }
-

@@ -1,11 +1,18 @@
 # CrabCrush 智能体验优化规划
 
-> 基于用户反馈（「体验差、不智能」）、项目讨论、以及行业分析资料的整理规划。
-> 本文档为规划性质，具体实施以 ROADMAP 和 DECISIONS 为准。
+> 历史文档：本文主要记录 2026-02 那轮“体验差、不智能”反馈后的回滚分析与重做思路。
+> 它**不再代表当前项目状态**。当前进度以 `AGENTS.md` 为准，短期计划以 `docs/ROADMAP.md` 为准，关键决策以 `docs/DECISIONS.md` 为准。
+
+## 当前说明（2026-03-19）
+
+- 工作区人格化（`AGENT.md / USER.md / IDENTITY.md / SOUL.md`）已重新落地，见 DEC-032 与 `src/workspace/`
+- `confirmRequired` 与 `permission_request` 已实现，WebChat / 钉钉均支持确认
+- `read_file / list_files` 已支持对 `fileBase` 外绝对路径发起运行时授权；文件工具也已从“短扩展名白名单”调整为“文本优先 + 二进制探测”
+- 因此本文以下内容应视为**历史复盘与设计参考**，不是当前待办清单
 
 ---
 
-## 一、本次回滚总结（2026-02-13）
+## 一、本次回滚总结（2026-02-13，历史记录）
 
 ### 回滚内容
 
@@ -85,10 +92,10 @@
 | 改 | write_file 覆盖 | 可选：edit 工具（按字符串替换，减少整文件覆盖） |
 | 查 | list_files 模式匹配 | 可选：语义搜索（成本高，Phase 2b+） |
 
-### 3.4 确认机制（高优先级）
+### 3.4 确认机制（高优先级，当时判断）
 
 - write_file、delete_file 等**高危操作**需用户确认
-- 当前 `confirmRequired: true` 已定义，**未实现**
+- 当时 `confirmRequired: true` 已定义但**尚未实现**；该项现已落地
 - 建议：2a.2 确认机制落地后再推人格化、delete_file
 
 ### 3.5 路径策略（低优先级）
@@ -109,7 +116,7 @@
    - 优先解决问题，再收集信息
 2. **可选**：支持 `agent.behaviorRules` 配置项，与 systemPrompt 拼接
 
-### Phase B：确认机制
+### Phase B：确认机制（历史建议）
 
 1. 实现 2a.2 confirmRequired
 2. write_file、delete_file 执行前弹窗/二次确认

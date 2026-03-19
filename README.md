@@ -68,8 +68,9 @@ pnpm install
 > 运行 `crabcrush doctor` 可检查是否已安装。
 > 依赖取舍说明（better-sqlite3、Playwright）见 [DEC-033](./docs/DECISIONS.md)。
 >
-> **read_file / list_files**：仅允许访问 `tools.fileBase`（默认 `~/.crabcrush`）下的**相对路径**（出于安全考虑，拒绝路径穿越）。如需让它访问其他目录，请把 `tools.fileBase` 指到你希望开放的根目录。
-> **write_file**：仅允许写入 `tools.fileBase` 下的相对路径（覆盖写入），且属于高危操作（`confirmRequired` 机制待完善）。
+> **browse_url / search_web**：访问外部网页或联网搜索前会弹出权限确认，可选择“仅本次 / 本会话 / 永久允许”。
+> **read_file / list_files**：默认允许访问 `tools.fileBase`（默认 `~/.crabcrush`）下的**相对路径**；若访问 `fileBase` 外的绝对路径，会先请求权限再执行。
+> **write_file**：仅允许写入 `tools.fileBase` 下的相对路径（覆盖写入），属于高危操作；执行前会展示预览并要求确认。
 >
 > **说明**：WebChat 所需的前端库（markdown-it、highlight.js）已随仓库放在 `public/vendor/`，克隆即用，无需安装或运行任何脚本。
 
@@ -93,6 +94,19 @@ models:
 >
 > 也可以用环境变量：`export CRABCRUSH_DEEPSEEK_API_KEY=sk-xxx`
 
+如果你准备限制“谁能使用本地工具（文件、浏览器、后续命令执行等）”，可以配置 `ownerIds`：
+
+```yaml
+ownerIds:
+  - webchat:default
+```
+
+说明：
+
+- 不配置 `ownerIds` 时，默认所有入口都是 owner，适合单人本地使用
+- 一旦配置了 `ownerIds`，就会进入白名单模式；此时 **WebChat 必须显式写上 `webchat:default`**
+- 钉钉等其他渠道则填写各自的真实用户 ID，可与 `webchat:default` 并存
+
 ### 3. 启动
 
 ```bash
@@ -108,12 +122,14 @@ pnpm dev
 ```
 🦀 CrabCrush Gateway 已启动
    模型: DeepSeek (deepseek-chat)
-   WebChat: http://127.0.0.1:18790
+   WebChat: http://127.0.0.1:18790/?token=YOUR_TOKEN
 ```
 
 ### 4. 开始聊天
 
-打开浏览器访问 **http://127.0.0.1:18790**，即可与 AI 对话。
+打开**启动时控制台打印的完整 URL**即可与 AI 对话。若你在配置里固定了 `auth.token`，格式通常是：
+
+**http://127.0.0.1:18790/?token=<your-token>**
 
 > 想接入钉钉？查看 [钉钉机器人接入指南](./guide/dingtalk-setup.md)（Stream 模式，不需要公网 IP）
 
@@ -149,7 +165,10 @@ models:
   qwen:
     apiKey: sk-xxx
     defaultModel: qwen-max
+    supportsToolCalls: false
 ```
+
+`supportsToolCalls` 默认为 `true`。如果某个当前模型不支持 tool/function calling，可显式设为 `false`；运行时会自动退回“只给纯文本方案，不实际执行工具”模式。
 
 ## 人格化与工作区
 

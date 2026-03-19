@@ -26,7 +26,7 @@ const program = new Command();
 program
   .name('crabcrush')
   .description('CrabCrush - 你的私人 AI 助手 🦀')
-  .version('0.0.1');
+  .version('0.1.0');
 
 program
   .command('start')
@@ -63,7 +63,13 @@ program
 
       providers.set(
         providerId,
-        new OpenAICompatibleProvider(providerId, baseURL, providerConfig.apiKey, defaultModel ?? providerId),
+        new OpenAICompatibleProvider(
+          providerId,
+          baseURL,
+          providerConfig.apiKey,
+          defaultModel ?? providerId,
+          providerConfig.supportsToolCalls,
+        ),
       );
     }
 
@@ -145,6 +151,7 @@ program
       const dingtalk = new DingTalkAdapter({
         clientId: dt.clientId,
         clientSecret: dt.clientSecret,
+        confirmTimeoutMs: config.agent.confirmTimeoutMs,
       });
       dingtalk.setChatHandler((sessionId, content, signal, senderId, confirmToolCall) =>
         agent.chat(sessionId, content, signal, senderId, confirmToolCall, 'dingtalk'),
@@ -157,7 +164,14 @@ program
 
     // 启动 Gateway（含 WebChat）
     const host = config.bind === 'all' ? '0.0.0.0' : '127.0.0.1';
-    const app = await startGateway({ port, bind: config.bind, agent, token, auditLogger });
+    const app = await startGateway({
+      port,
+      bind: config.bind,
+      agent,
+      token,
+      auditLogger,
+      confirmTimeoutMs: config.agent.confirmTimeoutMs,
+    });
 
     const { providerName, modelName } = router.primaryInfo;
     console.log(`\n🦀 CrabCrush Gateway 已启动`);
@@ -173,6 +187,9 @@ program
     }
     if (toolRegistry.size > 0) {
       console.log(`   工具: ${toolRegistry.names.join(', ')} (${toolRegistry.size} 个)`);
+      if (!router.primarySupportsToolCalls) {
+        console.log('执行能力: 当前主模型未启用 tool/function calling，已降级为纯文本方案模式');
+      }
     }
     console.log(`   WebChat: http://${host}:${port}/?token=${token}`);
     if (!config.auth?.token) {

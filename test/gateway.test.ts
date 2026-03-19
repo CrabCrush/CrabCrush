@@ -162,7 +162,39 @@ class PermissionFlowRouter {
   }
 }
 
-function createConfirmFlowRuntime(): AgentRuntime {
+class PlanTimeoutRouter {
+  async *chat(messages: ChatMessage[], options: ChatOptions = {}): AsyncIterable<ChatChunk> {
+    const toolMessages = messages.filter((message) => message.role === 'tool').length;
+    if (!options.tools || options.tools.length === 0) {
+      yield { content: '我先给你一个纯文字方案。', done: false };
+      yield { content: '', done: true, model: 'mock-model' };
+      return;
+    }
+    if (toolMessages === 0) {
+      yield {
+        content: '',
+        done: true,
+        model: 'mock-model',
+        toolCalls: [
+          {
+            id: 'call-plan-timeout-1',
+            type: 'function',
+            function: {
+              name: 'secure_action',
+              arguments: JSON.stringify({ path: 'workspace/plan.md' }),
+            },
+          },
+        ],
+      };
+      return;
+    }
+
+    yield { content: '已安全完成操作', done: false };
+    yield { content: '', done: true, model: 'mock-model' };
+  }
+}
+
+function createConfirmFlowRuntime(ownerIds: string[] = []): AgentRuntime {
   const registry = new ToolRegistry();
   let executionCount = 0;
   const secureTool: Tool = {
@@ -192,6 +224,38 @@ function createConfirmFlowRuntime(): AgentRuntime {
 
   return new AgentRuntime({
     router: new ConfirmFlowRouter() as never,
+    systemPrompt: 'test',
+    maxTokens: 1024,
+    toolRegistry: registry,
+    ownerIds,
+  });
+}
+
+function createPlanTimeoutRuntime(): AgentRuntime {
+  const registry = new ToolRegistry();
+  registry.register({
+    definition: {
+      name: 'secure_action',
+      description: 'mock protected tool',
+      parameters: { type: 'object', properties: {} },
+    },
+    permission: 'owner',
+    confirmRequired: true,
+    buildConfirmRequest: (args) => ({
+      message: '该操作会修改工作区文件。',
+      grantKey: 'file:write:workspace',
+      preview: {
+        title: '写入工作区文件',
+        summary: `将写入 ${(args.path as string) || 'unknown'}`,
+        riskLevel: 'high',
+        targets: [String(args.path || '')],
+      },
+    }),
+    execute: async () => ({ success: true, content: 'write ok' }),
+  } as Tool);
+
+  return new AgentRuntime({
+    router: new PlanTimeoutRouter() as never,
     systemPrompt: 'test',
     maxTokens: 1024,
     toolRegistry: registry,
@@ -226,7 +290,7 @@ function createPermissionFlowRuntime(): AgentRuntime {
     execute: async (args, context) => {
       const grantKey = `file:list:${String(args.path || '')}`;
       if (!context.hasPermissionGrant?.(grantKey)) {
-        const allowed = await context.requestPermission?.({
+        const decision = await context.requestPermission?.({
           action: 'list_files',
           message: `是否允许扫描该目录？\n${String(args.path || '')}`,
           params: args,
@@ -240,7 +304,14 @@ function createPermissionFlowRuntime(): AgentRuntime {
             targets: [String(args.path || '')],
           },
         });
-        if (!allowed) return { success: false, content: '用户拒绝执行工具 "scan_like"' };
+        if (!decision?.allow) {
+          return {
+            success: false,
+            content: '用户拒绝执行工具 "scan_like"',
+            failureKind: decision?.reason === 'timeout' ? 'timeout' : 'rejected',
+            degradeToAdvice: true,
+          };
+        }
       }
       return { success: true, content: 'scan ok' };
     },
@@ -348,7 +419,43 @@ function loadAuditEvents(ws: WebSocket, sessionId: string): Promise<Array<Record
   });
 }
 
-function loadPermissionGrants(ws: WebSocket): Promise<Array<Record<string, unknown>>> {
+function loadHistoryPage(
+  ws: WebSocket,
+  sessionId: string,
+  limit: number,
+  offset = 0,
+): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error('Timed out waiting for history page'));
+    }, 10_000);
+
+    const cleanup = () => {
+      clearTimeout(timeout);
+      ws.off('message', handleMessage);
+      ws.off('error', handleError);
+    };
+
+    const handleError = (err: Error) => {
+      cleanup();
+      reject(err);
+    };
+
+    const handleMessage = (data: WebSocket.RawData) => {
+      const msg = JSON.parse(data.toString()) as Record<string, unknown>;
+      if (msg.type !== 'history') return;
+      cleanup();
+      resolve(msg);
+    };
+
+    ws.on('message', handleMessage);
+    ws.on('error', handleError);
+    ws.send(JSON.stringify({ type: 'loadHistory', sessionId, limit, offset }));
+  });
+}
+
+function loadPermissionGrants(ws: WebSocket, sessionId?: string): Promise<Array<Record<string, unknown>>> {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       cleanup();
@@ -375,11 +482,18 @@ function loadPermissionGrants(ws: WebSocket): Promise<Array<Record<string, unkno
 
     ws.on('message', handleMessage);
     ws.on('error', handleError);
-    ws.send(JSON.stringify({ type: 'loadPermissionGrants' }));
+    const payload: Record<string, unknown> = { type: 'loadPermissionGrants' };
+    if (sessionId) payload.sessionId = sessionId;
+    ws.send(JSON.stringify(payload));
   });
 }
 
-function revokePermissionGrant(ws: WebSocket, grantKey: string): Promise<Record<string, unknown>> {
+function revokePermissionGrant(
+  ws: WebSocket,
+  grantKey: string,
+  scope: 'session' | 'persistent',
+  sessionId?: string,
+): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       cleanup();
@@ -406,7 +520,9 @@ function revokePermissionGrant(ws: WebSocket, grantKey: string): Promise<Record<
 
     ws.on('message', handleMessage);
     ws.on('error', handleError);
-    ws.send(JSON.stringify({ type: 'revokePermissionGrant', grantKey }));
+    const payload: Record<string, unknown> = { type: 'revokePermissionGrant', grantKey, scope };
+    if (sessionId) payload.sessionId = sessionId;
+    ws.send(JSON.stringify(payload));
   });
 }
 
@@ -433,6 +549,7 @@ describe('Gateway WebSocket confirm flow', () => {
 
       const types = messages.map((msg) => msg.type);
       const planEvent = messages.find((msg) => msg.type === 'tool_plan');
+      const planResultEvent = messages.find((msg) => msg.type === 'tool_plan_result');
       const confirmEvents = messages.filter((msg) => msg.type === 'confirm');
       const toolEvent = messages.find((msg) => msg.type === 'tool_call');
       const finalChunk = messages.find((msg) => msg.type === 'chunk' && msg.content === '已安全完成操作');
@@ -443,7 +560,14 @@ describe('Gateway WebSocket confirm flow', () => {
       expect(confirmEvents).toHaveLength(2);
       expect(confirmEvents[0]?.kind).toBe('plan');
       expect(confirmEvents[1]?.kind).toBe('confirm');
+      expect(confirmEvents[0]?.timeoutMs).toBe(60_000);
+      expect(confirmEvents[1]?.timeoutMs).toBe(60_000);
       expect(planEvent?.summary).toBe('准备执行 1 个步骤');
+      expect(planResultEvent).toMatchObject({
+        type: 'tool_plan_result',
+        operationId,
+        allowed: true,
+      });
       expect(operationId).not.toBe('');
       expect(confirmEvents[0]?.operationId).toBe(operationId);
       expect(confirmEvents[0]?.stepIndex).toBeUndefined();
@@ -459,6 +583,72 @@ describe('Gateway WebSocket confirm flow', () => {
       expect(finalChunk).toBeTruthy();
       expect(types.indexOf('tool_call')).toBeGreaterThan(types.indexOf('confirm'));
       expect(types.at(-1)).toBe('done');
+    } finally {
+      ws.close();
+      await server.close();
+    }
+  });
+
+  it('uses configured confirm timeout and emits timeout reason for plan approval', async () => {
+    const agent = createPlanTimeoutRuntime();
+    const server = await startGateway({
+      port: 0,
+      bind: 'loopback',
+      logger: false,
+      agent,
+      token: 'test-token',
+      confirmTimeoutMs: 25,
+    });
+    const port = (server.server.address() as AddressInfo).port;
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=test-token`);
+
+    try {
+      await waitForOpen(ws);
+
+      const messages = await runChat(ws, '请执行这个操作');
+      const confirmEvent = messages.find((msg) => msg.type === 'confirm');
+      const planResultEvent = messages.find((msg) => msg.type === 'tool_plan_result');
+      const toolEvent = messages.find((msg) => msg.type === 'tool_call');
+
+      expect(confirmEvent?.timeoutMs).toBe(25);
+      expect(planResultEvent).toMatchObject({
+        type: 'tool_plan_result',
+        allowed: false,
+        reason: 'timeout',
+      });
+      expect(toolEvent).toBeUndefined();
+    } finally {
+      ws.close();
+      await server.close();
+    }
+  });
+
+  it('uses a stable local owner identity for WebChat when ownerIds is configured', async () => {
+    const agent = createConfirmFlowRuntime(['webchat:default']);
+    const server = await startGateway({ port: 0, bind: 'loopback', logger: false, agent, token: 'test-token' });
+    const port = (server.server.address() as AddressInfo).port;
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=test-token`);
+
+    try {
+      await waitForOpen(ws);
+
+      const messages = await runChat(ws, '请执行这个操作', (msg) => {
+        if (msg.type !== 'confirm') return;
+        const scope = msg.kind === 'confirm' ? 'session' : 'once';
+        ws.send(JSON.stringify({
+          type: 'confirm_result',
+          id: msg.id,
+          allow: true,
+          scope,
+        }));
+      });
+
+      const toolEvent = messages.find((msg) => msg.type === 'tool_call');
+      expect(toolEvent).toMatchObject({
+        type: 'tool_call',
+        name: 'secure_action',
+        success: true,
+      });
     } finally {
       ws.close();
       await server.close();
@@ -504,6 +694,43 @@ describe('Gateway WebSocket confirm flow', () => {
         name: 'secure_action',
         success: true,
       });
+    } finally {
+      ws.close();
+      await server.close();
+    }
+  });
+
+  it('propagates structured failure info when tool confirmation is denied', async () => {
+    const agent = createConfirmFlowRuntime();
+    const server = await startGateway({ port: 0, bind: 'loopback', logger: false, agent, token: 'test-token' });
+    const port = (server.server.address() as AddressInfo).port;
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=test-token`);
+
+    try {
+      await waitForOpen(ws);
+
+      const messages = await runChat(ws, '请执行这个操作', (msg) => {
+        if (msg.type !== 'confirm') return;
+        ws.send(JSON.stringify({
+          type: 'confirm_result',
+          id: msg.id,
+          allow: msg.kind === 'plan',
+          scope: 'once',
+          reason: msg.kind === 'plan' ? undefined : 'rejected',
+        }));
+      });
+
+      const toolEvent = messages.find((msg) => msg.type === 'tool_call');
+      const finalDone = messages.find((msg) => msg.type === 'done');
+
+      expect(toolEvent).toMatchObject({
+        type: 'tool_call',
+        name: 'secure_action',
+        success: false,
+        failureKind: 'rejected',
+        degradeToAdvice: true,
+      });
+      expect(finalDone).toBeTruthy();
     } finally {
       ws.close();
       await server.close();
@@ -716,6 +943,43 @@ describe('Gateway WebSocket confirm flow', () => {
     }
   });
 
+  it('does not report hasMore when the remaining history exactly matches the page size', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'crabcrush-history-'));
+    const store = new ConversationStore(join(tempDir, 'history.db'));
+    store.ensureConversation('webchat-history', 'webchat', '');
+    store.saveMessage('webchat-history', 'user', 'u1');
+    store.saveMessage('webchat-history', 'assistant', 'a1');
+    store.saveMessage('webchat-history', 'user', 'u2');
+    store.saveMessage('webchat-history', 'assistant', 'a2');
+
+    const agent = new AgentRuntime({
+      router: new IdleRouter() as never,
+      systemPrompt: 'test',
+      maxTokens: 256,
+      ownerIds: [],
+      store,
+    });
+    const server = await startGateway({ port: 0, bind: 'loopback', logger: false, agent, token: 'test-token' });
+    const port = (server.server.address() as AddressInfo).port;
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=test-token`);
+
+    try {
+      await waitForOpen(ws);
+      const page1 = await loadHistoryPage(ws, 'webchat-history', 2, 0);
+      expect(page1.messages).toHaveLength(2);
+      expect(page1.hasMore).toBe(true);
+
+      const page2 = await loadHistoryPage(ws, 'webchat-history', 2, 2);
+      expect(page2.messages).toHaveLength(2);
+      expect(page2.hasMore).toBe(false);
+    } finally {
+      ws.close();
+      await server.close();
+      store.close();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it('lists and revokes persistent permission grants over websocket', async () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'crabcrush-grants-'));
     const store = new ConversationStore(join(tempDir, 'grants.db'));
@@ -750,15 +1014,129 @@ describe('Gateway WebSocket confirm flow', () => {
         resourceValue: 'example.com',
       });
 
-      const revokeResult = await revokePermissionGrant(ws, 'web:example.com');
+      const revokeResult = await revokePermissionGrant(ws, 'web:example.com', 'persistent');
       expect(revokeResult).toMatchObject({
         type: 'permission_grant_revoked',
         grantKey: 'web:example.com',
+        scope: 'persistent',
         revoked: true,
       });
 
       const refreshed = await loadPermissionGrants(ws);
       expect(refreshed).toHaveLength(0);
+    } finally {
+      ws.close();
+      await server.close();
+      store.close();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('lists current-session grants alongside persistent grants and revokes them by scope', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'crabcrush-grants-mixed-'));
+    const store = new ConversationStore(join(tempDir, 'grants.db'));
+    store.savePermissionGrant({
+      principalKey: 'webchat:default',
+      grantKey: 'web:persistent.example.com',
+      scope: 'persistent',
+      resourceType: 'domain',
+      resourceValue: 'persistent.example.com',
+      meta: { action: 'browse_url' },
+    });
+
+    const registry = new ToolRegistry();
+    registry.register({
+      definition: {
+        name: 'secure_action',
+        description: 'mock protected tool',
+        parameters: { type: 'object', properties: {} },
+      },
+      permission: 'owner',
+      confirmRequired: true,
+      buildConfirmRequest: () => ({
+        message: '该操作会访问当前会话内的外部网页。',
+        grantKey: 'web:session.example.com',
+        preview: {
+          title: '访问外部网页',
+          summary: '将访问 session.example.com',
+          riskLevel: 'medium',
+          targets: ['session.example.com'],
+        },
+      }),
+      execute: async () => ({ success: true, content: 'secure ok' }),
+    } as Tool);
+
+    const agent = new AgentRuntime({
+      router: new ConfirmFlowRouter() as never,
+      systemPrompt: 'test',
+      maxTokens: 1024,
+      toolRegistry: registry,
+      ownerIds: [],
+      store,
+    });
+    const server = await startGateway({ port: 0, bind: 'loopback', logger: false, agent, token: 'test-token' });
+    const port = (server.server.address() as AddressInfo).port;
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=test-token`);
+
+    try {
+      await waitForOpen(ws);
+      let currentSessionId = '';
+      await runChat(ws, '请执行这个操作', (msg) => {
+        if (msg.type === 'session' && typeof msg.sessionId === 'string') currentSessionId = msg.sessionId;
+        if (msg.type !== 'confirm') return;
+        ws.send(JSON.stringify({
+          type: 'confirm_result',
+          id: msg.id,
+          allow: true,
+          scope: msg.kind === 'confirm' ? 'session' : 'once',
+        }));
+      });
+
+      const grants = await loadPermissionGrants(ws, currentSessionId);
+      expect(grants).toHaveLength(2);
+      expect(grants).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          grantKey: 'web:session.example.com',
+          scope: 'session',
+          principalKey: 'webchat:default',
+          resourceType: 'domain',
+          resourceValue: 'session.example.com',
+          sessionId: currentSessionId,
+        }),
+        expect.objectContaining({
+          grantKey: 'web:persistent.example.com',
+          scope: 'persistent',
+          principalKey: 'webchat:default',
+          resourceType: 'domain',
+          resourceValue: 'persistent.example.com',
+        }),
+      ]));
+
+      const sessionRevoke = await revokePermissionGrant(ws, 'web:session.example.com', 'session', currentSessionId);
+      expect(sessionRevoke).toMatchObject({
+        type: 'permission_grant_revoked',
+        grantKey: 'web:session.example.com',
+        scope: 'session',
+        revoked: true,
+      });
+
+      const afterSessionRevoke = await loadPermissionGrants(ws, currentSessionId);
+      expect(afterSessionRevoke).toHaveLength(1);
+      expect(afterSessionRevoke[0]).toMatchObject({
+        grantKey: 'web:persistent.example.com',
+        scope: 'persistent',
+      });
+
+      const persistentRevoke = await revokePermissionGrant(ws, 'web:persistent.example.com', 'persistent', currentSessionId);
+      expect(persistentRevoke).toMatchObject({
+        type: 'permission_grant_revoked',
+        grantKey: 'web:persistent.example.com',
+        scope: 'persistent',
+        revoked: true,
+      });
+
+      const afterPersistentRevoke = await loadPermissionGrants(ws, currentSessionId);
+      expect(afterPersistentRevoke).toHaveLength(0);
     } finally {
       ws.close();
       await server.close();

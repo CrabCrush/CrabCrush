@@ -25,18 +25,48 @@ import type { PromptRegistry } from '../../prompts/types.js';
 import { WORKSPACE_DIR, WORKSPACE_FILES } from '../../workspace/index.js';
 
 const DEFAULT_MAX_CHARS = 8000;
+const MAX_BINARY_SAMPLE_BYTES = 4096;
+const MAX_BINARY_CONTROL_RATIO = 0.1;
 
-/** 允许的文本文件扩展名（避免读二进制） */
-const ALLOWED_EXT = new Set([
-  '.txt', '.md', '.json', '.yaml', '.yml', '.csv', '.log',
-  '.js', '.ts', '.mjs', '.cjs', '.html', '.css', '.xml',
-  '.py', '.sh', '.bash', '.zsh', '.env', '.gitignore',
+/** 已知二进制扩展名；未知扩展名按文本优先处理，再结合内容探测 */
+const KNOWN_BINARY_EXT = new Set([
+  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico', '.svgz',
+  '.pdf', '.zip', '.gz', '.tar', '.7z', '.rar',
+  '.mp3', '.wav', '.ogg', '.mp4', '.avi', '.mov', '.mkv',
+  '.exe', '.dll', '.so', '.dylib', '.bin', '.class', '.jar',
+  '.ttf', '.otf', '.woff', '.woff2',
+  '.db', '.sqlite', '.sqlite3',
 ]);
 
-function isAllowedExt(filePath: string): boolean {
+function getFileExt(filePath: string): string {
   const idx = filePath.lastIndexOf('.');
-  if (idx === -1) return true;
-  return ALLOWED_EXT.has(filePath.slice(idx).toLowerCase());
+  return idx === -1 ? '' : filePath.slice(idx).toLowerCase();
+}
+
+function hasKnownBinaryExt(filePath: string): boolean {
+  return KNOWN_BINARY_EXT.has(getFileExt(filePath));
+}
+
+function isProbablyBinaryContent(content: Uint8Array): boolean {
+  if (content.length === 0) return false;
+  const sample = content.subarray(0, Math.min(content.length, MAX_BINARY_SAMPLE_BYTES));
+  let suspicious = 0;
+  for (const byte of sample) {
+    if (byte === 0) return true;
+    const isControl = byte < 32 && byte !== 9 && byte !== 10 && byte !== 12 && byte !== 13;
+    if (isControl || byte === 127) suspicious += 1;
+  }
+  return suspicious / sample.length > MAX_BINARY_CONTROL_RATIO;
+}
+
+function getTextFileRestrictionMessage(filePath: string, content?: string): string | null {
+  if (hasKnownBinaryExt(filePath)) {
+    return `当前文件工具不支持二进制文件，目标路径看起来是二进制文件：${filePath}`;
+  }
+  if (typeof content === 'string' && content.includes('\u0000')) {
+    return '当前文件工具只支持文本文件，不支持写入包含空字节的内容。';
+  }
+  return null;
 }
 
 function isPathSafe(base: string, relativePath: string): boolean {
@@ -116,13 +146,25 @@ async function requestOutOfBasePermission(
     return null;
   }
   if (!context.requestPermission) {
-    return { success: false, content: '路径超出允许范围，需要通道支持权限确认。' };
+    return {
+      success: false,
+      content: '路径超出允许范围，需要通道支持权限确认。',
+      failureKind: 'confirmation_required',
+      degradeToAdvice: true,
+    };
   }
-  const allowed = await context.requestPermission({
+  const decision = await context.requestPermission({
     ...buildOutOfBasePermissionRequest(action, fullPath, params, message.split('\n').slice(1).join('\n') || fullPath),
     grantKey,
   });
-  if (!allowed) return { success: false, content: `用户拒绝执行工具 "${action}"` };
+  if (!decision.allow) {
+    return {
+      success: false,
+      content: `用户拒绝执行工具 "${action}"`,
+      failureKind: decision.reason === 'timeout' ? 'timeout' : 'rejected',
+      degradeToAdvice: true,
+    };
+  }
   return null;
 }
 
@@ -187,10 +229,11 @@ export function createReadFileTool(config?: { fileBase?: string }, prompts?: Pro
         return { success: false, content: `路径不安全，仅允许读取 ${baseDisplay} 下的文件` };
       }
 
-      if (!isAllowedExt(trimmed)) {
+      const textRestriction = getTextFileRestrictionMessage(trimmed);
+      if (textRestriction) {
         return {
           success: false,
-          content: '不支持该文件类型。允许的扩展名：' + [...ALLOWED_EXT].join(', '),
+          content: textRestriction,
         };
       }
 
@@ -208,8 +251,14 @@ export function createReadFileTool(config?: { fileBase?: string }, prompts?: Pro
       }
 
       try {
-        const buf = await readFile(fullPath, { encoding: 'utf-8' });
-        let text = buf;
+        const buf = await readFile(fullPath);
+        if (isProbablyBinaryContent(buf)) {
+          return {
+            success: false,
+            content: `当前文件工具不支持二进制文件，检测到 ${pathArg} 的内容更像二进制数据。`,
+          };
+        }
+        let text = buf.toString('utf-8');
         const truncated = text.length > maxChars;
         if (truncated) {
           text = text.slice(0, maxChars) + '\n\n（内容已截断）';
@@ -437,9 +486,15 @@ export function createWriteFileTool(config?: { fileBase?: string }, prompts?: Pr
 
     async precheck(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult | null> {
       const pathArg = args.path as string;
+      const content = args.content as string | undefined;
       const overwrite = Boolean(args.overwrite);
 
-      if (!pathArg || typeof pathArg !== 'string') return null;
+      if (!pathArg || typeof pathArg !== 'string') {
+        return { success: false, content: '请提供有效的 path 参数' };
+      }
+      if (content === undefined || content === null) {
+        return { success: false, content: '请提供 content 参数' };
+      }
       const reservedPathError = getReservedWorkspacePathError(pathArg);
       if (reservedPathError) return { success: false, content: reservedPathError };
       // 这里的意图判断只是防“模型自作主张写文件”的低成本护栏。
@@ -452,8 +507,18 @@ export function createWriteFileTool(config?: { fileBase?: string }, prompts?: Pr
       }
 
       const basePath = getFileBasePath(config);
+      const baseDisplay = basePath.startsWith(homedir()) ? '~' + basePath.slice(homedir().length) : basePath;
       const trimmed = pathArg.trim().replace(/^\/+/, '');
-      if (!isPathSafe(basePath, trimmed)) return null;
+      if (!isPathSafe(basePath, trimmed)) {
+        return { success: false, content: `路径不安全，仅允许写入 ${baseDisplay} 下的文件` };
+      }
+      const textRestriction = getTextFileRestrictionMessage(trimmed, typeof content === 'string' ? content : undefined);
+      if (textRestriction) {
+        return {
+          success: false,
+          content: textRestriction,
+        };
+      }
 
       const fullPath = resolve(basePath, trimmed);
       try {
@@ -502,10 +567,11 @@ export function createWriteFileTool(config?: { fileBase?: string }, prompts?: Pr
         return { success: false, content: `路径不安全，仅允许写入 ${baseDisplay} 下的文件` };
       }
 
-      if (!isAllowedExt(trimmed)) {
+      const textRestriction = getTextFileRestrictionMessage(trimmed, typeof content === 'string' ? content : undefined);
+      if (textRestriction) {
         return {
           success: false,
-          content: `不支持该文件类型。允许的扩展名：${[...ALLOWED_EXT].join(', ')}`,
+          content: textRestriction,
         };
       }
 

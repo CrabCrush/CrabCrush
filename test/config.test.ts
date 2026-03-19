@@ -11,6 +11,7 @@ describe('Config Schema', () => {
     expect(config.bind).toBe('loopback');
     expect(config.agent.model).toBe('deepseek-chat');
     expect(config.agent.systemPrompt).toContain('CrabCrush');
+    expect(config.agent.confirmTimeoutMs).toBe(60_000);
   });
 
   it('accepts full config', () => {
@@ -21,12 +22,14 @@ describe('Config Schema', () => {
         deepseek: {
           apiKey: 'sk-test-key',
           baseURL: 'https://api.deepseek.com/v1',
+          supportsToolCalls: false,
         },
       },
       agent: {
         model: 'deepseek-chat',
         systemPrompt: '你好',
         maxTokens: 2048,
+        confirmTimeoutMs: 90_000,
       },
       prompts: {
         dir: './prompts',
@@ -35,7 +38,9 @@ describe('Config Schema', () => {
     expect(config.port).toBe(3000);
     expect(config.bind).toBe('all');
     expect(config.models.deepseek.apiKey).toBe('sk-test-key');
+    expect(config.models.deepseek.supportsToolCalls).toBe(false);
     expect(config.agent.maxTokens).toBe(2048);
+    expect(config.agent.confirmTimeoutMs).toBe(90_000);
     expect(config.prompts.dir).toBe('./prompts');
   });
 

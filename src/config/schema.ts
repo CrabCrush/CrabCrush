@@ -42,6 +42,8 @@ const modelProviderSchema = z.object({
   baseURL: z.string().optional(),
   apiKey: z.string().min(1, 'API Key 不能为空'),
   defaultModel: z.string().optional(),
+  /** 当前 provider 实例是否支持 tool/function calling；关闭后运行时会退回纯文本方案模式 */
+  supportsToolCalls: z.boolean().default(true),
 });
 
 // 渠道配置
@@ -85,12 +87,15 @@ export const configSchema = z.object({
     maxTokens: z.number().int().default(4096),
     /** 发给 API 的最大消息条数（1 轮 = 2 条，默认 40 条 = 20 轮） */
     contextWindow: z.number().int().min(2).max(200).default(40),
+    /** 工具/计划确认超时时间（毫秒），默认 60 秒 */
+    confirmTimeoutMs: z.number().int().min(5_000).max(300_000).default(60_000),
   }).default({
     model: 'deepseek-chat',
     fallbackModels: [],
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
     maxTokens: 4096,
     contextWindow: 40,
+    confirmTimeoutMs: 60_000,
   }),
 
   /** Owner 用户 ID（只有 owner 能触发本地操作类工具，详见 DEC-026） */

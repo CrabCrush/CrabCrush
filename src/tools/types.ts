@@ -80,6 +80,7 @@ export interface ToolConfirmRequest {
 export interface ToolConfirmDecision {
   allow: boolean;
   scope?: ConfirmationScope;
+  reason?: 'rejected' | 'timeout';
 }
 
 /** 工具确认处理器 */
@@ -103,7 +104,7 @@ export interface PermissionRequest {
 export interface ToolContext {
   /** 渠道类型（webchat / dingtalk 等） */
   channel?: string;
-  /** 发送者 ID（钉钉 userId / WebChat sessionId） */
+  /** 发送者 ID（钉钉 userId / WebChat 固定本地主体 ID） */
   senderId: string;
   /** 权限主体键（如 webchat:default / dingtalk:staff-001） */
   principalKey?: string;
@@ -120,7 +121,7 @@ export interface ToolContext {
   /** 需要确认时的回调（由通道层提供） */
   confirm?: ToolConfirmHandler;
   /** 运行时权限请求（动态） */
-  requestPermission?: (request: PermissionRequest) => Promise<boolean>;
+  requestPermission?: (request: PermissionRequest) => Promise<ToolConfirmDecision>;
   /** 检查是否已有授权；touch=false 时仅探测，不刷新持久授权最近使用时间 */
   hasPermissionGrant?: (grantKey: string, options?: { touch?: boolean }) => boolean;
   /** 记录授权（session / persistent） */
@@ -136,6 +137,13 @@ export interface ToolContext {
   audit?: (event: { type: string; [key: string]: unknown }) => void;
 }
 
+export type ToolFailureKind =
+  | 'rejected'
+  | 'timeout'
+  | 'confirmation_required'
+  | 'confirmation_failed'
+  | 'error';
+
 /**
  * 工具执行结果
  */
@@ -143,6 +151,10 @@ export interface ToolResult {
   success: boolean;
   /** 返回给模型的内容 */
   content: string;
+  /** 结构化失败原因，避免运行时/前端依赖字符串匹配 */
+  failureKind?: ToolFailureKind;
+  /** 是否应停止后续执行并降级为只给方案 */
+  degradeToAdvice?: boolean;
 }
 
 /**

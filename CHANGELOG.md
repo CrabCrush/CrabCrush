@@ -5,6 +5,28 @@
 ---
 
 ## [未发布]
+### 2026-03-19
+
+#### fix: 收口执行底座边界与状态同步
+
+- 修复模型路由对通用 4xx 的误判：不再把配置类错误错误地 failover 到备选模型
+- 收紧 `write_file` 的确认前预检：路径越界、扩展名不支持、缺少参数等请求不再先弹确认后失败
+- 文件工具从“短扩展名白名单”调整为“文本优先 + 二进制探测”，常见代码文件不再被误拒绝
+- 调整 `search_web` 的持久授权键，从“所有搜索共用一个授权”改为按搜索引擎域名集建模
+- 修复 WebSocket 历史分页 `hasMore` 判定，避免剩余消息刚好等于页大小时多显示一次“加载更多”
+- 修复 WebChat owner 身份判断：配置 `ownerIds` 后不再错误绑定随机 `sessionId`
+- 统一计划确认 / 工具确认 / 权限请求的结构化失败原因，前端与审计可区分拒绝、超时与缺少确认能力
+- 同步 CLI 版本号为 `0.1.0`
+
+#### docs: 同步 README / AGENTS / ROADMAP 到当前实现状态
+
+- README 更新 WebChat token 访问方式，以及文件/联网工具的当前权限边界
+- 配置示例补充 `agent.confirmTimeoutMs`，并明确 `ownerIds` 场景下 WebChat 需写入 `webchat:default`
+- AGENTS 更新为 2026-03-19 的真实阶段描述，明确 2a 基础版已交付、下一步转向收口
+- ROADMAP 标记钉钉 Block Streaming、审计持久化、运行时权限请求、作用域授权、执行预览、拒绝后降级、审计回放等已落地项
+- DEC-031 与 `docs/DESIGN/permissions.md` 改为“设计 + 当前实现状态”同步表述
+- 收口 `docs/ARCHITECTURE.md`、`docs/SMART_EXPERIENCE_PLAN.md`、`docs/VISION.md` 中易误导的旧状态说明
+
 ### 2026-03-18
 
 #### feat: Prompt 分层加载与工作区主入口收敛

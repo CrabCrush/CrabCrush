@@ -19,7 +19,6 @@ import type { PermissionRequest, Tool, ToolContext, ToolResult } from '../types.
 const GOOGLE_TIMEOUT_MS = 5_000; // 有代理时很快，无代理会超时
 const BING_BAIDU_TIMEOUT_MS = 12_000;
 const MAX_RESULTS = 10;
-const SEARCH_PERMISSION_GRANT_KEY = 'network:search_web';
 
 function getSearchToolPrompts(prompts?: PromptRegistry): PromptRegistry['tools']['search'] {
   return (prompts ?? createDefaultPromptRegistry()).tools.search;
@@ -103,6 +102,11 @@ function getEngineTargets(order: EngineId[]): string[] {
   return [...targets];
 }
 
+function getSearchPermissionGrantKey(order: EngineId[]): string {
+  const targets = getEngineTargets(order).sort();
+  return `network:search:${targets.join('|')}`;
+}
+
 function buildSearchPermissionRequest(query: string): PermissionRequest | null {
   if (!query || typeof query !== 'string' || !query.trim()) return null;
   const order = getEngineOrder();
@@ -110,7 +114,7 @@ function buildSearchPermissionRequest(query: string): PermissionRequest | null {
     action: 'search_web',
     message: `是否允许联网搜索该关键词？\n${query}`,
     params: { query },
-    grantKey: SEARCH_PERMISSION_GRANT_KEY,
+    grantKey: getSearchPermissionGrantKey(order),
     scopeOptions: ['once', 'session', 'persistent'],
     defaultScope: 'once',
     preview: {
@@ -209,17 +213,30 @@ export function createSearchWebTool(prompts?: PromptRegistry): Tool {
       }
 
       const order = getEngineOrder();
-      if (!context.hasPermissionGrant?.(SEARCH_PERMISSION_GRANT_KEY)) {
+      const grantKey = getSearchPermissionGrantKey(order);
+      if (!context.hasPermissionGrant?.(grantKey)) {
         if (!context.requestPermission) {
-          return { success: false, content: '联网搜索需要通道支持权限确认。' };
+          return {
+            success: false,
+            content: '联网搜索需要通道支持权限确认。',
+            failureKind: 'confirmation_required',
+            degradeToAdvice: true,
+          };
         }
-        const allowed = await context.requestPermission(buildSearchPermissionRequest(query) ?? {
+        const decision = await context.requestPermission(buildSearchPermissionRequest(query) ?? {
           action: 'search_web',
           message: `是否允许联网搜索该关键词？\n${query}`,
           params: { query },
-          grantKey: SEARCH_PERMISSION_GRANT_KEY,
+          grantKey,
         });
-        if (!allowed) return { success: false, content: '用户拒绝执行工具 "search_web"' };
+        if (!decision.allow) {
+          return {
+            success: false,
+            content: '用户拒绝执行工具 "search_web"',
+            failureKind: decision.reason === 'timeout' ? 'timeout' : 'rejected',
+            degradeToAdvice: true,
+          };
+        }
       }
 
       let browser;

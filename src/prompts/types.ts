@@ -35,6 +35,7 @@ export interface PromptRegistry {
     fileToolEnforcement: string;
     fileToolRequiredMessage: string;
     adviceOnlyDegrade: string;
+    modelCapabilityDegrade: string;
     planApprovalMessage: string;
     planSummarySingle: string;
     planSummaryMultiple: string;

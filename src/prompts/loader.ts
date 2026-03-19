@@ -112,6 +112,7 @@ export function loadPromptRegistry(options: PromptLoadOptions = {}): PromptRegis
     ['fileToolEnforcement', join(promptsDir, 'runtime', 'file-tool-enforcement.md')],
     ['fileToolRequiredMessage', join(promptsDir, 'runtime', 'file-tool-required-message.md')],
     ['adviceOnlyDegrade', join(promptsDir, 'runtime', 'advice-only-degrade.md')],
+    ['modelCapabilityDegrade', join(promptsDir, 'runtime', 'model-capability-degrade.md')],
     ['planApprovalMessage', join(promptsDir, 'runtime', 'plan-approval-message.md')],
     ['planSummarySingle', join(promptsDir, 'runtime', 'plan-summary-single.md')],
     ['planSummaryMultiple', join(promptsDir, 'runtime', 'plan-summary-multiple.md')],

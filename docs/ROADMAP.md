@@ -99,11 +99,9 @@ Phase 0 + 1 ✅        Phase 2a (当前)        Phase 2b         Phase 2c       
   - DoD：钉钉适配器完全通过 ChannelAdapter 接口实现，无特殊硬编码
 - [x] 多人 Session 隔离（详见 DEC-011）
   - DoD：同一群内不同用户 @机器人，各自上下文独立（按 senderStaffId 隔离）
-- [ ] 钉钉 Block Streaming（借鉴 OpenClaw）
-  - 背景：钉钉 sessionWebhook 不支持 token 级流式，当前等整条回复再发，体感慢
-  - 方案：按块分片发送（如每 500–1500 字符发一条），边生成边发，减少等待感
-  - 参考：OpenClaw `blockStreamingChunk`、`blockStreamingCoalesce`、`textChunkLimit`
-  - 优先级：Phase 3（渠道扩展时一并抽象为渠道通用能力）
+- [x] 钉钉 Block Streaming（借鉴 OpenClaw）
+  - DoD：钉钉回复不再等整条生成完成；按块分片发送，支持字符阈值与定时 flush
+  - 备注：当前已通过 `BlockStreamer` 以通用 helper 形式落地，后续飞书/企微可复用
 
 ### 1.2 模型层完善
 - [x] 模型路由器（自动匹配提供商 + 显式 `providerId/modelName` 格式）
@@ -135,7 +133,7 @@ Phase 0 + 1 ✅        Phase 2a (当前)        Phase 2b         Phase 2c       
 ### 2a.0 快速胜利（小改动、大价值）
 - [x] WebChat Token 认证（当前任何人知道 IP+端口就能访问，安全隐患）
 - [ ] API 响应缓存（相同问题不重复调 API，省 token 省钱）
-- [ ] 审计日志持久化（替代当前仅控制台输出）
+- [x] 审计日志持久化（`audit.log` + SQLite `audit_events`）
 - [ ] WebSocket 连接数限制与入口级限流配置化
 
 ### 2a.1 本地对话持久化 + 上下文管理（兑现“本地优先”承诺）
@@ -156,29 +154,30 @@ Phase 0 + 1 ✅        Phase 2a (当前)        Phase 2b         Phase 2c       
 
 ### 2a.2 Function Calling + 安全沙箱（必须同步上线，详见 DEC-026、DEC-028）
 - [x] Function Calling 协议支持（OpenAI 兼容格式）
-- [ ] 能力不足时的降级策略（不支持 tool_call → 提示词注入方式）
+- [x] 能力不足时的降级策略（不支持 tool_call → 明确退回纯文本方案模式）
 - [x] Owner 认证机制（`ownerIds` 配置，未配置时默认所有人是 owner）
-- [ ] 代码执行沙箱选型决策（Docker vs 隔离进程 vs worker_threads）
+- [ ] 受限执行路线与沙箱边界决策：明确“预定义修复动作 / 宿主机受限命令 / 真正代码沙箱”三层边界，并确认是否需要调整 DEC-026
 - [ ] 数据安全防线（DEC-028）：工具结果脱敏、列白名单、确认机制
-- [ ] **安全可控原则（DEC-034）**：高风险操作（读/写/删、本地命令、脚本执行、外部网络访问等）必须走 `confirmRequired`（工具级）或 `permission_request`（请求级）确认流程
-- [ ] **运行时权限请求**（Cursor 式）：执行前主动询问「是否允许访问 XX」「是否允许安装 XX」（设计见 [`docs/DESIGN/permissions.md`](./DESIGN/permissions.md)）
-- [ ] 权限作用域：一次授权 / 会话内授权 / 永久授权到指定目录、域名、数据库
-- [ ] 执行预览：展示即将访问的路径、域名、命令、写入目标，再执行
-- [ ] 拒绝后降级：用户拒绝执行时，自动退回“只给方案，不动手”
-- [ ] 审计回放：记录每次申请、批准、拒绝和最终执行结果
+- [x] **安全可控原则（DEC-034）**：当前已上线的高风险内置工具均走 `confirmRequired`（工具级）或 `permission_request`（请求级）确认流程
+- [x] **运行时权限请求**（Cursor 式）：执行前主动询问「是否允许访问 XX」「是否允许安装 XX」（设计见 [`docs/DESIGN/permissions.md`](./DESIGN/permissions.md)）
+- [x] 权限作用域：一次授权 / 会话内授权 / 永久授权到指定目录、域名、数据库
+- [x] 执行预览：展示即将访问的路径、域名、命令、写入目标，再执行
+- [x] 拒绝后降级：用户拒绝执行时，自动退回“只给方案，不动手”
+- [x] 审计回放：记录每次申请、批准、拒绝和最终执行结果
 
 > 说明：该部分属于“交互/协议设计”，已下沉到 `docs/DESIGN/permissions.md`，避免路线图过长；ROADMAP 这里仅保留目标与待办。
 
 ### 2a.3 执行体验（把“确认”做成产品能力）
-- [ ] WebChat 任务确认面板：比单纯弹窗/文本确认更清楚地展示风险和影响范围
-- [ ] 多步任务执行摘要：模型先给 plan，再逐步申请权限和执行
-- [ ] 工具错误“可操作”化：缺依赖、缺权限、越界访问时给出下一步动作
+- [x] WebChat 执行工作台基础版：当前任务 / 审计回放 / 授权中心（会话授权 + 长期授权） / 工作区设置
+- [ ] WebChat 任务确认面板增强：比当前确认弹窗更清楚地展示风险和影响范围
+- [x] 多步任务执行摘要基础版：模型先给 plan，再逐步申请权限和执行，WebChat 可回放最近任务状态
+- [ ] 工具错误“可操作”化：缺依赖、缺权限、越界访问时给出下一步动作（优先做预定义 repair action，不直接演变成任意命令执行入口）
 
 ### 2a.4 当前已具备的工具基座
 - [x] 浏览器控制（Playwright Core：抓取网页内容 `browse_url`）
 - [x] 文件操作：`read_file`（读取 ~/.crabcrush 下文本文件，默认截断 8000 字符）
 - [x] 文件操作：`list_files`（查找/列出文件，支持 path、pattern、recursive）
-- [x] 文件操作：`write_file`（写入 fileBase 下文件，自动创建父目录；confirmRequired 待 2a.2 实现）
+- [x] 文件操作：`write_file`（写入 fileBase 下文件，自动创建父目录；高危写入走 confirmRequired + 执行预览）
 - [x] 网页搜索（`search_web`：Google/Bing/百度 智能选择）
 
 ### 2a.5 配置热加载（详见 DEC-018）
@@ -202,7 +201,12 @@ Phase 0 + 1 ✅        Phase 2a (当前)        Phase 2b         Phase 2c       
 - [ ] 文件操作（续）：文档解析
   - **设计时必读**：DEC-030 — 文件单独存、消息存引用；大内容不塞进 `messages.content`；可选的消息长度限制与自动清理
 - [ ] 数据库查询（MySQL/PostgreSQL/SQLite，默认只读，列白名单）
-- [ ] 代码执行（沙箱内运行 Python/JS/Shell）
+- [ ] 受限执行 v0：预定义修复动作 / 安装动作（如 `install_chromium`），只允许白名单 action，不开放任意命令
+- [ ] 受限执行 v1：若允许宿主机命令执行，则仅开放 owner + 始终确认 + 执行预览（shell / cwd / command）+ 超时 + 输出截断 + 禁止交互/常驻进程
+- [ ] 受限执行 v1：命令边界先限制在 workspace / allowlist 场景，不做自动安装、自由重试、模型自行改写命令链
+- [ ] 受限执行 v2：真正的代码沙箱（Python/JS/Shell），与宿主机命令执行分层设计，不混为一个工具
+
+> 说明：这里故意把“修复动作”“宿主机命令”“代码沙箱”拆成三层。它们的风险边界、确认方式、失败兜底都不同；如果一开始混成“exec 一把梭”，后面很容易变成又难控又难审计的脏代码。
 
 ### 2b.3 Skills 框架（详见 DEC-029）
 
@@ -341,8 +345,8 @@ Phase 0 + 1 ✅        Phase 2a (当前)        Phase 2b         Phase 2c       
 | 项目 | 现状 | 规划 |
 |------|------|------|
 | **Gateway 请求限流** | WebSocket 基础限流已实现 | 规则配置化与覆盖更多入口（Phase 2a） |
-| **持久化日志** | 仅控制台 | `~/.crabcrush/logs/`，Phase 2a |
-| **危险操作确认** | confirmRequired 已支持（WebChat/DingTalk） | 运行时权限请求、范围授权、审计回放仍待 2a.2 |
+| **持久化日志** | `~/.crabcrush/logs/audit.log` + SQLite `audit_events` 已实现 | 后续补管理界面与导出能力 |
+| **危险操作确认** | confirmRequired / permission_request / 范围授权 / 审计回放已基础实现 | 继续收口权限中心与后续新增工具的一致性 |
 | **WebSocket 连接数限制** | 无 | 防止资源耗尽，Phase 2a |
 
 ---

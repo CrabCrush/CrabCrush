@@ -107,6 +107,31 @@ describe('ToolRegistry', () => {
     expect(result.success).toBe(false);
     expect(result.content).toContain('boom');
   });
+
+  it('precheck blocks invalid write_file requests before confirmation', async () => {
+    const registry = new ToolRegistry();
+    registry.register(writeFileTool);
+    let confirmCount = 0;
+
+    const result = await registry.execute(
+      'write_file',
+      { path: '../../../etc/passwd', content: 'x' },
+      {
+        senderId: 'owner-1',
+        isOwner: true,
+        sessionId: 'sess-1',
+        userMessage: '请把内容写入文件',
+        confirm: async () => {
+          confirmCount += 1;
+          return { allow: true, scope: 'once' };
+        },
+      },
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.content).toContain('不安全');
+    expect(confirmCount).toBe(0);
+  });
 });
 describe('tool prompt registry injection', () => {
   it('injects custom prompts into time/browser/search/file tool definitions', () => {
@@ -202,12 +227,42 @@ describe('search_web tool', () => {
       senderId: 'owner-1',
       isOwner: true,
       sessionId: 'sess-1',
-      requestPermission: async () => false,
+      requestPermission: async () => ({ allow: false, reason: 'rejected' }),
       hasPermissionGrant: () => false,
     };
     const result = await searchWebTool.execute({ query: 'CrabCrush' }, ctx);
     expect(result.success).toBe(false);
     expect(result.content).toContain('用户拒绝执行工具 "search_web"');
+  });
+
+  it('keeps timeout as structured failure when permission request times out', async () => {
+    const ctx: ToolContext = {
+      senderId: 'owner-1',
+      isOwner: true,
+      sessionId: 'sess-1',
+      requestPermission: async () => ({ allow: false, reason: 'timeout' }),
+      hasPermissionGrant: () => false,
+    };
+    const result = await searchWebTool.execute({ query: 'CrabCrush' }, ctx);
+    expect(result.success).toBe(false);
+    expect(result.failureKind).toBe('timeout');
+    expect(result.degradeToAdvice).toBe(true);
+  });
+
+  it('builds a stable domain-scoped grant key for search engines', () => {
+    const request = searchWebTool.buildPermissionRequest?.({ query: 'CrabCrush' }, {
+      senderId: 'owner-1',
+      isOwner: true,
+      sessionId: 'sess-1',
+    });
+
+    expect(request?.grantKey).toBe('network:search:www.baidu.com|www.bing.com|www.google.com');
+    expect(request?.preview?.targets).toEqual([
+      'www.google.com',
+      'www.bing.com',
+      'www.baidu.com',
+      'CrabCrush',
+    ]);
   });
 
   it('is an owner tool', () => {
@@ -248,6 +303,40 @@ describe('read_file tool', () => {
     const result = await readFileTool.execute({ path: 'workspace/image.png' }, ctx);
     expect(result.success).toBe(false);
     expect(result.content).toContain('不支持');
+  });
+
+  it('allows common code files outside the old extension whitelist', async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'crabcrush-readfile-'));
+    const origBase = process.env.CRABCRUSH_FILE_BASE;
+    process.env.CRABCRUSH_FILE_BASE = tmpDir;
+
+    try {
+      mkdirSync(join(tmpDir, 'workspace'), { recursive: true });
+      writeFileSync(join(tmpDir, 'workspace', 'App.tsx'), 'export function App() { return <div>Hello</div>; }');
+      const result = await readFileTool.execute({ path: 'workspace/App.tsx' }, ctx);
+      expect(result.success).toBe(true);
+      expect(result.content).toContain('export function App');
+    } finally {
+      process.env.CRABCRUSH_FILE_BASE = origBase;
+      rmSync(tmpDir, { recursive: true });
+    }
+  });
+
+  it('rejects extensionless binary content', async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'crabcrush-readfile-'));
+    const origBase = process.env.CRABCRUSH_FILE_BASE;
+    process.env.CRABCRUSH_FILE_BASE = tmpDir;
+
+    try {
+      mkdirSync(join(tmpDir, 'workspace'), { recursive: true });
+      writeFileSync(join(tmpDir, 'workspace', 'blob'), Buffer.from([0, 159, 146, 150]));
+      const result = await readFileTool.execute({ path: 'workspace/blob' }, ctx);
+      expect(result.success).toBe(false);
+      expect(result.content).toContain('二进制');
+    } finally {
+      process.env.CRABCRUSH_FILE_BASE = origBase;
+      rmSync(tmpDir, { recursive: true });
+    }
   });
 
   it('returns file not found for non-existent file', async () => {
@@ -350,6 +439,35 @@ describe('write_file tool', () => {
     const result = await writeFileTool.execute({ path: 'workspace/image.png', content: 'x' }, ctx);
     expect(result.success).toBe(false);
     expect(result.content).toContain('不支持');
+  });
+
+  it('allows writing common text code files outside the old extension whitelist', async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'crabcrush-writefile-'));
+    const origBase = process.env.CRABCRUSH_FILE_BASE;
+    process.env.CRABCRUSH_FILE_BASE = tmpDir;
+
+    try {
+      const result = await writeFileTool.execute(
+        { path: 'workspace/schema.sql', content: 'select 1;' },
+        { ...ctx, userMessage: '请把这段 SQL 保存到文件里' },
+      );
+      expect(result.success).toBe(true);
+      const read = await readFileTool.execute({ path: 'workspace/schema.sql' }, ctx);
+      expect(read.success).toBe(true);
+      expect(read.content).toContain('select 1;');
+    } finally {
+      process.env.CRABCRUSH_FILE_BASE = origBase;
+      rmSync(tmpDir, { recursive: true });
+    }
+  });
+
+  it('rejects null-byte content even when extension is unknown', async () => {
+    const result = await writeFileTool.execute(
+      { path: 'workspace/blob.custom', content: 'a\u0000b' },
+      { ...ctx, userMessage: '请把这段内容写入文件' },
+    );
+    expect(result.success).toBe(false);
+    expect(result.content).toContain('空字节');
   });
 
   it('blocks write_file when no intent in userMessage', async () => {

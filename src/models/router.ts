@@ -6,7 +6,7 @@
  * - Failover：主模型失败时自动切换备选
  */
 
-import { OpenAICompatibleProvider } from './provider.js';
+import { ModelApiError, OpenAICompatibleProvider } from './provider.js';
 import type { ChatMessage, ChatChunk, ChatOptions } from './provider.js';
 import { KNOWN_PROVIDERS } from '../config/schema.js';
 
@@ -29,6 +29,10 @@ export class ModelRouter {
     this.providers = providers;
     this.primaryModel = this.parseModelSpec(primaryModel);
     this.fallbackModels = fallbackModels.map((m) => this.parseModelSpec(m));
+  }
+
+  private supportsToolCallsFor(model: ModelSpec): boolean {
+    return this.providers.get(model.providerId)?.supportsToolCalls !== false;
   }
 
   /**
@@ -98,6 +102,17 @@ export class ModelRouter {
         continue;
       }
 
+      if (options.tools && options.tools.length > 0 && !provider.supportsToolCalls) {
+        const providerName = KNOWN_PROVIDERS[providerId]?.name ?? providerId;
+        if (i === 0) {
+          throw new Error(`当前模型 ${providerName}(${modelName}) 未启用 tool/function calling 能力。`);
+        }
+        console.warn(
+          `[ModelRouter] 跳过不支持工具调用的备选模型: ${providerName}(${modelName})`,
+        );
+        continue;
+      }
+
       try {
         const chatOptions: ChatOptions = { ...options, model: modelName };
         yield* provider.chat(messages, chatOptions);
@@ -130,6 +145,9 @@ export class ModelRouter {
 
   /** 4xx 类错误：API Key / 余额 / 限流，不应该 failover */
   private isClientError(err: Error): boolean {
+    if (err instanceof ModelApiError && err.statusCode !== undefined) {
+      return err.statusCode < 500;
+    }
     return (
       err.message.includes('API Key') ||
       err.message.includes('余额不足') ||
@@ -142,6 +160,11 @@ export class ModelRouter {
     const { providerId, modelName } = this.primaryModel;
     const providerName = KNOWN_PROVIDERS[providerId]?.name ?? providerId;
     return { providerId, modelName, providerName };
+  }
+
+  /** 当前主模型是否支持 tool/function calling */
+  get primarySupportsToolCalls(): boolean {
+    return this.supportsToolCallsFor(this.primaryModel);
   }
 
   /** 是否配置了 Failover */

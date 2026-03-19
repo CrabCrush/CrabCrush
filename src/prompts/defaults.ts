@@ -19,6 +19,7 @@ export function createDefaultPromptRegistry(basePrompt = DEFAULT_SYSTEM_PROMPT):
       fileToolEnforcement: '【工具强制要求】当前用户请求涉及文件状态或文件读写。你必须优先调用 read_file / list_files / write_file 等工具完成检查或写入，不能直接口头声称文件存在、已创建或已更新。',
       fileToolRequiredMessage: '当前请求涉及文件状态或文件读写，但模型本轮没有调用必要工具。我需要先通过工具确认后才能继续，请重试。',
       adviceOnlyDegrade: '【降级执行模式】\n用户刚刚拒绝了执行计划或工具确认，或者确认已超时。\n你现在必须进入“只给方案、不动手”模式：\n- 明确说明这次没有实际执行\n- 不要再调用工具，也不要声称已经完成了文件/网页/系统操作\n- 如果已有部分工具结果，可以基于这些已知结果继续总结\n- 给出纯文本的替代方案、手动步骤或可复制内容\n- 保持语气自然、简洁、可执行',
+      modelCapabilityDegrade: '【模型能力限制】\n当前模型未启用 tool/function calling 能力，本轮只能提供纯文本方案，不能实际执行文件、网页、数据库、系统命令等操作。\n- 明确说明这次无法直接动手\n- 不要假装已经读取文件、访问网页、执行命令或修改系统\n- 优先给出可执行的手动步骤、检查方法、命令示例或下一步建议\n- 如任务依赖工具结果，直接说明当前模型能力不足',
       planApprovalMessage: '即将执行上述计划。批准后才会开始逐步执行和确认。',
       planSummarySingle: '准备执行 1 个步骤',
       planSummaryMultiple: '准备执行 {{count}} 个步骤',

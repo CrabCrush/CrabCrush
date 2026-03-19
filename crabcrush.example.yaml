@@ -42,6 +42,9 @@ agent:
   # 发给 API 的最大消息条数（1 轮对话 = 2 条消息，默认 40 = 最近 20 轮），越大记忆越长，但 token 消耗越多（= 越贵）
   contextWindow: 40
 
+  # 工具/计划确认超时时间（毫秒），默认 60000 = 60 秒
+  # confirmTimeoutMs: 60000
+
 # 工具配置
 tools:
   # read_file 可读取的根目录，默认 ~/.crabcrush。环境变量 CRABCRUSH_FILE_BASE 优先
@@ -50,7 +53,9 @@ tools:
 # Owner 用户 ID（只有 owner 能触发本地操作类工具）
 # 不配置时默认所有用户都是 owner（适合个人使用）
 # 放到群聊时建议配置，防止其他人操控你的电脑
+# 一旦配置 ownerIds，WebChat 必须显式写上 webchat:default
 # ownerIds:
+#   - webchat:default
 #   - "钉钉userId"
 #   - "飞书openId"
 

@@ -333,11 +333,11 @@
 
 ## DEC-031：钉钉 Block Streaming — 借鉴 OpenClaw
 
-- **状态**：已规划，待实现（见 ROADMAP Phase 1.1 / 2a）
-- **背景**：钉钉 sessionWebhook 不支持 token 级流式，当前实现等整条回复再发，用户体感慢。OpenClaw 对 WhatsApp/Slack 等渠道采用 Block Streaming：按块分片发送，边生成边发。
-- **决策**：规划引入 Block Streaming，钉钉/飞书等非 WebSocket 渠道按块发送多条消息
+- **状态**：已实现（见 `src/channels/block_streaming.ts`、`src/channels/dingtalk.ts`）
+- **背景**：钉钉 sessionWebhook 不支持 token 级流式，若等整条回复生成完成再发送，用户体感慢。OpenClaw 对 WhatsApp/Slack 等渠道采用 Block Streaming：按块分片发送，边生成边发。
+- **决策**：引入通用 `BlockStreamer` helper，钉钉已按块发送多条消息；后续飞书/企微等非 WebSocket 渠道继续复用同一抽象
 - **参考**：OpenClaw `blockStreamingChunk`（min/max 字符）、`blockStreamingCoalesce`（合并小块）、`textChunkLimit`（渠道上限）
-- **实现时机**：飞书/企微接入时一并抽象为渠道层通用能力，避免钉钉单点实现
+- **后续**：继续调优不同渠道的阈值与格式策略，但不再属于“是否实现”的问题
 
 ---
 

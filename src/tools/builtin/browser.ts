@@ -102,15 +102,27 @@ export function createBrowseUrlTool(prompts?: PromptRegistry): Tool {
           const grantKey = permissionRequest?.grantKey ?? getBrowseGrantKey(parsed);
           if (!context.hasPermissionGrant?.(grantKey)) {
             if (!context.requestPermission) {
-              return { success: false, content: '访问外部网页需要通道支持权限确认。' };
+              return {
+                success: false,
+                content: '访问外部网页需要通道支持权限确认。',
+                failureKind: 'confirmation_required',
+                degradeToAdvice: true,
+              };
             }
-            const allowed = await context.requestPermission(permissionRequest ?? {
+            const decision = await context.requestPermission(permissionRequest ?? {
               action: 'browse_url',
               message: `是否允许访问该 URL？\n${url}`,
               params: { url },
               grantKey,
             });
-            if (!allowed) return { success: false, content: '用户拒绝执行工具 "browse_url"' };
+            if (!decision.allow) {
+              return {
+                success: false,
+                content: '用户拒绝执行工具 "browse_url"',
+                failureKind: decision.reason === 'timeout' ? 'timeout' : 'rejected',
+                degradeToAdvice: true,
+              };
+            }
           }
         }
       } catch {

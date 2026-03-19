@@ -1,9 +1,13 @@
-import { describe, it, expect } from 'vitest';
-import { OpenAICompatibleProvider } from '../src/models/provider.js';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { ModelApiError, OpenAICompatibleProvider } from '../src/models/provider.js';
 import { ModelRouter } from '../src/models/router.js';
 import { estimateCost } from '../src/models/pricing.js';
 
 describe('OpenAICompatibleProvider', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('can be instantiated', () => {
     const provider = new OpenAICompatibleProvider(
       'test',
@@ -12,6 +16,28 @@ describe('OpenAICompatibleProvider', () => {
       'test-model',
     );
     expect(provider.id).toBe('test');
+  });
+
+  it('does not retry on 4xx responses inside provider fetchWithRetry', async () => {
+    const provider = new OpenAICompatibleProvider(
+      'test',
+      'https://api.example.com/v1',
+      'sk-test',
+      'test-model',
+    );
+
+    const fetchMock = vi.fn(async () => new Response('bad request', { status: 400 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const providerWithRetry = provider as unknown as {
+      fetchWithRetry(url: string, body: string, externalSignal?: AbortSignal): Promise<Response>;
+    };
+
+    await expect(providerWithRetry.fetchWithRetry(
+      'https://api.example.com/v1/chat/completions',
+      '{}',
+    )).rejects.toBeInstanceOf(ModelApiError);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -73,6 +99,78 @@ describe('ModelRouter', () => {
     const router = new ModelRouter(providers, 'deepseek-chat', ['qwen/qwen-plus']);
     expect(router.hasFallback).toBe(true);
     expect(router.modelChain.length).toBe(2);
+  });
+
+  it('does not fail over on generic 4xx model API errors', async () => {
+    let fallbackCalled = false;
+    const providers = new Map<string, OpenAICompatibleProvider>();
+    providers.set('deepseek', {
+      id: 'deepseek',
+      chat() {
+        return {
+          [Symbol.asyncIterator]() {
+            return {
+              async next() {
+                throw new ModelApiError('模型 API 调用失败 (400): bad request', { statusCode: 400 });
+              },
+            };
+          },
+        };
+      },
+    } as OpenAICompatibleProvider);
+    providers.set('qwen', {
+      id: 'qwen',
+      async *chat() {
+        fallbackCalled = true;
+        yield { content: 'unexpected fallback', done: false };
+        yield { content: '', done: true, model: 'qwen-max' };
+      },
+    } as OpenAICompatibleProvider);
+
+    const router = new ModelRouter(providers, 'deepseek-chat', ['qwen/qwen-max']);
+
+    await expect(async () => {
+      for await (const chunk of router.chat([])) {
+        void chunk;
+      }
+    }).rejects.toThrow('400');
+    expect(fallbackCalled).toBe(false);
+  });
+
+  it('fails over on retryable provider errors', async () => {
+    let fallbackCalled = false;
+    const providers = new Map<string, OpenAICompatibleProvider>();
+    providers.set('deepseek', {
+      id: 'deepseek',
+      chat() {
+        return {
+          [Symbol.asyncIterator]() {
+            return {
+              async next() {
+                throw new Error('模型 API 服务端错误 (500): temporary');
+              },
+            };
+          },
+        };
+      },
+    } as OpenAICompatibleProvider);
+    providers.set('qwen', {
+      id: 'qwen',
+      async *chat() {
+        fallbackCalled = true;
+        yield { content: 'fallback ok', done: false };
+        yield { content: '', done: true, model: 'qwen-max' };
+      },
+    } as OpenAICompatibleProvider);
+
+    const router = new ModelRouter(providers, 'deepseek-chat', ['qwen/qwen-max']);
+    const chunks: string[] = [];
+    for await (const chunk of router.chat([])) {
+      if (chunk.content) chunks.push(chunk.content);
+    }
+
+    expect(fallbackCalled).toBe(true);
+    expect(chunks).toContain('fallback ok');
   });
 });
 

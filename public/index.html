@@ -1051,7 +1051,7 @@
       </span>
       <span class="workspace-dock-label">审计</span>
     </button>
-    <button class="workspace-dock-btn" data-workspace-tab="grants" data-tip="持久授权记录" type="button" title="持久授权记录" aria-label="持久授权记录">
+    <button class="workspace-dock-btn" data-workspace-tab="grants" data-tip="授权中心" type="button" title="授权中心" aria-label="授权中心">
       <span class="workspace-dock-icon" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
           <path d="M12 3l7 3v5c0 4.5-2.9 7.8-7 10-4.1-2.2-7-5.5-7-10V6l7-3z"></path>
@@ -1093,9 +1093,9 @@
         </div>
       </details>
       <details id="grants-details" class="workspace-section side-panel" open hidden>
-        <summary>持久授权记录</summary>
+        <summary>授权中心</summary>
         <div class="side-panel-body">
-          <div id="grants-panel">当前暂无持久授权记录。</div>
+          <div id="grants-panel">当前暂无授权记录。</div>
         </div>
       </details>
       <details id="workspace-settings-details" class="workspace-section side-panel" open hidden>
@@ -1248,7 +1248,7 @@
                     const resultEl = document.createElement('div');
                     resultEl.className = 'tool-plan';
                     const icon = t.allowed ? '✅' : '❌';
-                    const text = t.allowed ? '已批准执行计划' : '已拒绝执行计划';
+                    const text = getPlanDecisionBadge(Boolean(t.allowed), t.reason);
                     resultEl.innerHTML = `<div class="tool-header">${icon} <strong>${text}</strong></div><div style="margin-top:0.25rem;color:var(--text-muted)">第 ${Number(t.round || 0)} 轮计划</div>`;
                     fragment.appendChild(resultEl);
                   }
@@ -1322,7 +1322,7 @@
       lastAuditEvents = [];
       if (auditTimeline) auditTimeline.innerHTML = '<div style="color:var(--text-muted)">当前会话暂无可回放的执行审计。</div>';
       if (auditDetails) auditDetails.open = true;
-      if (grantsPanel) grantsPanel.innerHTML = '<div style="color:var(--text-muted)">当前暂无持久授权记录。</div>';
+      if (grantsPanel) grantsPanel.innerHTML = '<div style="color:var(--text-muted)">当前暂无授权记录。</div>';
       if (grantsDetails) grantsDetails.open = true;
       welcomeShown = true;
       // 通知服务端重置 sessionId，否则下一条消息会发到旧会话
@@ -1392,7 +1392,7 @@
     const workspacePanelMeta = {
       task: { title: '当前任务', subtitle: '查看执行步骤、状态与授权上下文。' },
       audit: { title: '审计回放', subtitle: '按时间查看本会话的执行轨迹。' },
-      grants: { title: '持久授权记录', subtitle: '查看与撤销当前主体下的长期授权。' },
+      grants: { title: '授权中心', subtitle: '查看当前会话授权与长期授权，并可按范围撤销。' },
       workspace: { title: '工作区设置', subtitle: '直接编辑 AGENT.md、USER.md、IDENTITY.md、SOUL.md。' },
     };
     let activeWorkspaceTab = 'task';
@@ -1694,23 +1694,64 @@
       renderTaskPanel();
     }
 
+    function isDegradeFailureKind(kind) {
+      return kind === 'rejected' || kind === 'timeout' || kind === 'confirmation_required';
+    }
+
+    function getDegradeSummaryText(stepIndex, failureKind) {
+      if (failureKind === 'timeout') {
+        return `第 ${stepIndex} 步等待确认超时，当前任务已降级。`;
+      }
+      if (failureKind === 'confirmation_required') {
+        return `第 ${stepIndex} 步需要确认，但当前通道暂不支持该确认，当前任务已降级。`;
+      }
+      return `第 ${stepIndex} 步被拒绝，当前任务已降级。`;
+    }
+
+    function getDegradeResultText(failureKind, fallbackText) {
+      if (failureKind === 'timeout') return '等待确认超时，未执行该步骤。';
+      if (failureKind === 'confirmation_required') return '当前通道不支持该确认，未执行该步骤。';
+      return fallbackText || '用户拒绝执行该步骤。';
+    }
+
+    function getPlanDecisionText(allowed, reason, autoApproved) {
+      if (allowed) {
+        return autoApproved ? '执行计划已自动批准，开始执行。' : '执行计划已批准，开始执行。';
+      }
+      if (reason === 'timeout') return '执行计划确认超时，本轮将降级为只给方案。';
+      return '已拒绝执行计划，本轮将降级为只给方案。';
+    }
+
+    function getPlanDecisionBadge(allowed, reason) {
+      if (allowed) return '已批准执行计划';
+      if (reason === 'timeout') return '执行计划确认超时';
+      return '已拒绝执行计划';
+    }
+
+    function getDecisionPrefix(allowed, reason, approvedText, rejectedText, timeoutText) {
+      if (allowed) return approvedText;
+      if (reason === 'timeout') return timeoutText;
+      return rejectedText;
+    }
+
     function applyToolCallEvent(msg) {
       const task = ensureTaskState(msg.operationId);
       if (!task) return;
       const stepIndex = Number(msg.stepIndex || task.steps.length + 1);
       const step = ensureTaskStep(task, stepIndex, msg.name);
       step.result = String(msg.result || '');
+      step.failureKind = typeof msg.failureKind === 'string' ? msg.failureKind : '';
       if (step.title === step.name) step.title = msg.name || step.title;
       if (msg.success) {
         step.status = 'success';
         task.status = 'running';
         task.summaryText = `已完成第 ${step.index} 步。`;
       } else {
-        const rejected = typeof msg.result === 'string' && msg.result.includes('用户拒绝执行工具');
-        step.status = rejected ? 'rejected' : 'failed';
-        task.status = rejected ? 'degraded' : 'failed';
-        task.summaryText = rejected
-          ? `第 ${step.index} 步被拒绝，当前任务已降级。`
+        const degraded = Boolean(msg.degradeToAdvice) || isDegradeFailureKind(msg.failureKind);
+        step.status = degraded ? 'rejected' : 'failed';
+        task.status = degraded ? 'degraded' : 'failed';
+        task.summaryText = degraded
+          ? getDegradeSummaryText(step.index, msg.failureKind)
           : `第 ${step.index} 步执行失败。`;
       }
       renderTaskPanel();
@@ -1723,6 +1764,9 @@
       const successCount = steps.filter((step) => step.status === 'success').length;
       const failedCount = steps.filter((step) => step.status === 'failed').length;
       const rejectedCount = steps.filter((step) => step.status === 'rejected').length;
+      const timeoutCount = steps.filter((step) => step.status === 'rejected' && step.failureKind === 'timeout').length;
+      const unsupportedCount = steps.filter((step) => step.status === 'rejected' && step.failureKind === 'confirmation_required').length;
+      const deniedCount = Math.max(0, rejectedCount - timeoutCount - unsupportedCount);
       if (task.status !== 'rejected' && task.status !== 'degraded') {
         task.status = failedCount > 0 ? 'failed' : 'completed';
       }
@@ -1731,13 +1775,13 @@
       } else if (task.status === 'failed') {
         task.summaryText = `执行结束：${successCount} 步成功，${failedCount} 步失败。`;
       } else if (task.status === 'rejected' || task.status === 'degraded') {
-        task.summaryText = rejectedCount > 0
-          ? `任务未完整执行：${rejectedCount} 步被拒绝，已降级为只给方案。`
-          : task.summaryText;
-      }
-      if (typeof finalText === 'string' && finalText.includes('不动手')) {
-        task.status = task.status === 'rejected' ? 'rejected' : 'degraded';
-        task.summaryText = '本轮未继续执行，已切换为只给方案。';
+        if (rejectedCount > 0) {
+          const parts = [];
+          if (deniedCount > 0) parts.push(`${deniedCount} 步被拒绝`);
+          if (timeoutCount > 0) parts.push(`${timeoutCount} 步确认超时`);
+          if (unsupportedCount > 0) parts.push(`${unsupportedCount} 步缺少确认能力`);
+          task.summaryText = `任务未完整执行：${parts.join('，')}，已降级为只给方案。`;
+        }
       }
       renderTaskPanel();
     }
@@ -1828,9 +1872,7 @@
 
         if (event.eventType === 'tool_plan_result') {
           task.status = event.allowed ? 'running' : 'rejected';
-          task.summaryText = event.allowed
-            ? (payload.autoApproved ? '执行计划已自动批准，开始执行。' : '执行计划已批准，开始执行。')
-            : '已拒绝执行计划，本轮将降级为只给方案。';
+          task.summaryText = getPlanDecisionText(event.allowed, payload.reason, payload.autoApproved);
           continue;
         }
 
@@ -1854,7 +1896,7 @@
           const isPlanResult = payload.kind === 'plan' || (!stepIndex && payload.name === 'execute_plan' && event.eventType !== 'permission_request_result');
           if (isPlanResult) {
             task.status = event.allowed ? 'running' : 'rejected';
-            task.summaryText = event.allowed ? '执行计划已批准，开始执行。' : '已拒绝执行计划，本轮将降级为只给方案。';
+            task.summaryText = getPlanDecisionText(event.allowed, payload.reason, payload.autoApproved);
           } else if (stepIndex) {
             const step = ensureTaskStep(task, stepIndex, stepName);
             if (event.allowed) {
@@ -1865,9 +1907,10 @@
               step.status = 'rejected';
               task.status = 'degraded';
               step.result = event.eventType === 'permission_request_result'
-                ? '用户拒绝授予执行该步骤所需权限。'
-                : '用户拒绝执行该步骤。';
-              task.summaryText = `已拒绝第 ${step.index} 步，当前任务将降级为只给方案。`;
+                ? getDegradeResultText(payload.reason, '用户拒绝授予执行该步骤所需权限。')
+                : getDegradeResultText(payload.reason, '用户拒绝执行该步骤。');
+              step.failureKind = payload.reason || 'rejected';
+              task.summaryText = getDegradeSummaryText(step.index, payload.reason);
             }
           }
           continue;
@@ -1884,15 +1927,19 @@
         if (event.eventType === 'tool_result' && stepIndex) {
           const step = ensureTaskStep(task, stepIndex, stepName);
           if (typeof payload.result === 'string') step.result = payload.result;
-          const rejected = typeof step.result === 'string' && (step.result.includes('用户拒绝执行工具') || step.result.includes('确认超时') || step.result.includes('需要用户确认'));
+          step.failureKind = typeof payload.failureKind === 'string' ? payload.failureKind : '';
+          const degraded = Boolean(payload.degradeToAdvice) || isDegradeFailureKind(payload.failureKind);
           if (payload.success) {
             step.status = 'success';
             task.status = 'running';
             task.summaryText = `已完成第 ${step.index} 步。`;
           } else {
-            step.status = rejected ? 'rejected' : 'failed';
-            task.status = rejected ? 'degraded' : 'failed';
-            task.summaryText = rejected ? `第 ${step.index} 步被拒绝，当前任务已降级。` : `第 ${step.index} 步执行失败。`;
+            step.status = degraded ? 'rejected' : 'failed';
+            task.status = degraded ? 'degraded' : 'failed';
+            if (degraded && !step.result) {
+              step.result = getDegradeResultText(payload.failureKind, '');
+            }
+            task.summaryText = degraded ? getDegradeSummaryText(step.index, payload.failureKind) : `第 ${step.index} 步执行失败。`;
           }
         }
       }
@@ -1908,13 +1955,20 @@
         const failedCount = steps.filter((step) => step.status === 'failed').length;
         const rejectedCount = steps.filter((step) => step.status === 'rejected').length;
         const waitingCount = steps.filter((step) => step.status === 'waiting_confirm' || step.status === 'running' || step.status === 'pending').length;
+        const timeoutCount = steps.filter((step) => step.status === 'rejected' && step.failureKind === 'timeout').length;
+        const unsupportedCount = steps.filter((step) => step.status === 'rejected' && step.failureKind === 'confirmation_required').length;
+        const deniedCount = Math.max(0, rejectedCount - timeoutCount - unsupportedCount);
         if (task.status === 'running' || task.status === 'planning') {
           if (failedCount > 0) {
             task.status = 'failed';
             task.summaryText = `执行结束：${successCount} 步成功，${failedCount} 步失败。`;
           } else if (rejectedCount > 0) {
             task.status = 'degraded';
-            task.summaryText = `任务未完整执行：${rejectedCount} 步被拒绝，已降级为只给方案。`;
+            const parts = [];
+            if (deniedCount > 0) parts.push(`${deniedCount} 步被拒绝`);
+            if (timeoutCount > 0) parts.push(`${timeoutCount} 步确认超时`);
+            if (unsupportedCount > 0) parts.push(`${unsupportedCount} 步缺少确认能力`);
+            task.summaryText = `任务未完整执行：${parts.join('，')}，已降级为只给方案。`;
           } else if (steps.length > 0 && waitingCount === 0) {
             task.status = 'completed';
             task.summaryText = `执行完成：${successCount}/${steps.length} 步成功。`;
@@ -1940,13 +1994,15 @@
         const steps = Array.isArray(payload.steps) ? payload.steps.length : 0;
         return `计划审批：${steps} 个步骤待执行`;
       }
-      if (event.eventType === 'tool_plan_result') return event.allowed ? '已批准执行计划' : '已拒绝执行计划';
+      if (event.eventType === 'tool_plan_result') return getPlanDecisionBadge(event.allowed, payload.reason);
       if (event.eventType === 'permission_request_result') {
-        return `${event.allowed ? '已授权' : '已拒绝'}权限：${payload.action || payload.name || event.eventType}`;
+        const prefix = getDecisionPrefix(event.allowed, payload.reason, '已授权', '已拒绝', '已超时');
+        return `${prefix}权限：${payload.action || payload.name || event.eventType}`;
       }
       if (event.eventType === 'tool_confirm_request') return `等待确认：${payload.name || event.toolName || '未命名操作'}`;
       if (event.eventType === 'tool_confirm_result' || event.eventType === 'tool_confirm') {
-        return `${event.allowed ? '已允许' : '已拒绝'}执行：${payload.name || event.toolName || '未命名操作'}`;
+        const prefix = getDecisionPrefix(event.allowed, payload.reason, '已允许', '已拒绝', '已超时');
+        return `${prefix}执行：${payload.name || event.toolName || '未命名操作'}`;
       }
       if (event.eventType === 'tool_call') return `开始执行工具：${payload.name || event.toolName || '未命名工具'}`;
       if (event.eventType === 'tool_result') {
@@ -2005,57 +2061,135 @@
       }
     }
 
+    function formatGrantAction(action) {
+      const actionMap = {
+        browse_url: '访问网页',
+        search_web: '联网搜索',
+        list_files: '扫描目录',
+        read_file: '读取文件',
+        write_file: '写入文件',
+        query_db: '查询数据库',
+      };
+      if (!action) return '';
+      return actionMap[action] || String(action).replaceAll('_', ' ');
+    }
+
+    function getGrantScopeMeta(scope) {
+      if (scope === 'session') {
+        return {
+          label: '当前会话',
+          hint: '仅当前会话有效',
+          style: 'display:inline-flex;align-items:center;padding:0.1rem 0.4rem;border-radius:999px;background:rgba(14,116,144,0.14);color:#7dd3fc;font-size:0.75rem',
+        };
+      }
+      return {
+        label: '长期授权',
+        hint: '对当前主体持续有效',
+        style: 'display:inline-flex;align-items:center;padding:0.1rem 0.4rem;border-radius:999px;background:rgba(22,101,52,0.14);color:#86efac;font-size:0.75rem',
+      };
+    }
+
     function describeGrant(grant) {
       const typeMap = { path: '路径', domain: '域名', database: '数据库', other: '其他' };
+      const meta = grant && typeof grant.meta === 'object' ? grant.meta : {};
+      const targets = Array.isArray(meta?.targets)
+        ? meta.targets.filter((item) => typeof item === 'string' && item)
+        : [];
+      const scopeMeta = getGrantScopeMeta(grant.scope);
       return {
         title: grant.resourceValue || grant.grantKey || '未命名资源',
         typeLabel: typeMap[grant.resourceType] || '其他',
-        action: grant.meta?.action || '',
+        action: formatGrantAction(typeof meta?.action === 'string' ? meta.action : ''),
+        summary: typeof meta?.previewSummary === 'string' ? meta.previewSummary : '',
+        targets,
+        scopeLabel: scopeMeta.label,
+        scopeHint: scopeMeta.hint,
+        scopeStyle: scopeMeta.style,
       };
+    }
+
+    function renderGrantGroup(title, subtitle, grants) {
+      const list = Array.isArray(grants) ? grants : [];
+      const body = list.length === 0
+        ? `<div style="padding:0.4rem 0;color:var(--text-muted)">${escapeHtml(subtitle)}</div>`
+        : list.map((grant) => {
+          const info = describeGrant(grant);
+          return `
+            <div style="padding:0.75rem 0;border-bottom:1px solid rgba(255,255,255,0.06)">
+              <div style="display:flex;justify-content:space-between;gap:0.8rem;align-items:flex-start">
+                <div style="min-width:0">
+                  <div style="display:flex;flex-wrap:wrap;gap:0.35rem;align-items:center">
+                    <div style="font-weight:600;color:var(--text)">${escapeHtml(String(info.title))}</div>
+                    <span style="${info.scopeStyle}">${escapeHtml(String(info.scopeLabel))}</span>
+                    <span style="display:inline-flex;align-items:center;padding:0.1rem 0.4rem;border-radius:999px;background:rgba(148,163,184,0.12);color:var(--text-muted);font-size:0.75rem">${escapeHtml(String(info.typeLabel))}</span>
+                    ${info.action ? `<span style="display:inline-flex;align-items:center;padding:0.1rem 0.4rem;border-radius:999px;background:rgba(96,165,250,0.12);color:#bfdbfe;font-size:0.75rem">${escapeHtml(String(info.action))}</span>` : ''}
+                  </div>
+                  ${info.summary ? `<div style="margin-top:0.3rem;color:var(--text);line-height:1.6">${escapeHtml(String(info.summary))}</div>` : ''}
+                  ${info.targets.length > 0 ? `<div style="margin-top:0.25rem;color:var(--text-muted)">目标：${escapeHtml(info.targets.join(' / '))}</div>` : ''}
+                  <div style="margin-top:0.25rem;color:var(--text-muted)">范围：${escapeHtml(String(info.scopeHint))}</div>
+                  <div style="margin-top:0.25rem;color:var(--text-muted)">创建：${escapeHtml(formatGrantTime(grant.createdAt) || '未知')}</div>
+                  <div style="margin-top:0.25rem;color:var(--text-muted)">最近使用：${escapeHtml(formatGrantTime(grant.lastUsedAt) || '未知')}</div>
+                  <details style="margin-top:0.35rem">
+                    <summary style="cursor:pointer;color:var(--text-muted)">技术信息</summary>
+                    <div style="margin-top:0.25rem;color:var(--text-muted)">授权键：${escapeHtml(String(grant.grantKey || ''))}</div>
+                    ${grant.sessionId ? `<div style="margin-top:0.2rem;color:var(--text-muted)">会话：${escapeHtml(String(grant.sessionId))}</div>` : ''}
+                  </details>
+                </div>
+                <button
+                  type="button"
+                  data-grant-key="${escapeHtml(String(grant.grantKey || ''))}"
+                  data-grant-scope="${escapeHtml(String(grant.scope || 'persistent'))}"
+                  data-session-id="${escapeHtml(String(grant.sessionId || ''))}"
+                  style="padding:0.35rem 0.55rem;border:none;border-radius:6px;background:#7f1d1d;color:#fff;cursor:pointer"
+                  onclick="revokeGrant(this)"
+                >撤销</button>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+      return `
+        <section style="margin-top:1rem">
+          <div style="font-size:0.8rem;font-weight:600;letter-spacing:0.02em;color:var(--text-muted)">${escapeHtml(title)}</div>
+          <div style="margin-top:0.2rem;color:var(--text-muted);font-size:0.8rem">${escapeHtml(subtitle)}</div>
+          <div style="margin-top:0.35rem">${body}</div>
+        </section>
+      `;
     }
 
     function renderPermissionGrants(grants) {
       if (!grantsPanel) return;
       const list = Array.isArray(grants) ? grants : [];
       if (list.length === 0) {
-        grantsPanel.innerHTML = '<div style="color:var(--text-muted)">当前暂无持久授权记录。</div>';
+        grantsPanel.innerHTML = '<div style="color:var(--text-muted)">当前会话和长期授权均为空。</div>';
         return;
       }
-      grantsPanel.innerHTML = list.map((grant) => {
-        const info = describeGrant(grant);
-        return `
-          <div style="padding:0.65rem 0;border-bottom:1px solid rgba(255,255,255,0.06)">
-            <div style="display:flex;justify-content:space-between;gap:0.8rem;align-items:flex-start">
-              <div>
-                <div style="font-weight:600;color:var(--text)">${escapeHtml(String(info.title))}</div>
-                <div style="margin-top:0.2rem;color:var(--text-muted)">类型：${escapeHtml(String(info.typeLabel))}${info.action ? ` | 操作：${escapeHtml(String(info.action))}` : ''}</div>
-                <div style="margin-top:0.2rem;color:var(--text-muted)">授权键：${escapeHtml(String(grant.grantKey || ''))}</div>
-                <div style="margin-top:0.2rem;color:var(--text-muted)">创建：${escapeHtml(formatGrantTime(grant.createdAt))}</div>
-                <div style="margin-top:0.2rem;color:var(--text-muted)">最近使用：${escapeHtml(formatGrantTime(grant.lastUsedAt))}</div>
-              </div>
-              <button
-                type="button"
-                data-grant-key="${escapeHtml(String(grant.grantKey || ''))}"
-                style="padding:0.35rem 0.55rem;border:none;border-radius:6px;background:#7f1d1d;color:#fff;cursor:pointer"
-                onclick="revokeGrant(this)"
-              >撤销</button>
-            </div>
-          </div>
-        `;
-      }).join('');
+      const sessionGrants = list.filter((grant) => grant.scope === 'session');
+      const persistentGrants = list.filter((grant) => grant.scope !== 'session');
+      grantsPanel.innerHTML = `
+        <div style="color:var(--text-muted);line-height:1.6">当前面板会同时展示本会话的临时授权，以及当前主体下的长期授权。</div>
+        ${renderGrantGroup('当前会话授权', '关闭会话或手动撤销后失效。', sessionGrants)}
+        ${renderGrantGroup('长期授权', '会在后续会话中持续生效，直到手动撤销。', persistentGrants)}
+      `;
     }
 
     function requestPermissionGrants() {
       if (!ws || ws.readyState !== 1) return;
-      ws.send(JSON.stringify({ type: 'loadPermissionGrants' }));
+      const payload = { type: 'loadPermissionGrants' };
+      if (sessionId) payload.sessionId = sessionId;
+      ws.send(JSON.stringify(payload));
     }
 
     function revokeGrant(button) {
       const grantKey = button?.dataset?.grantKey;
+      const scope = button?.dataset?.grantScope === 'session' ? 'session' : 'persistent';
+      const targetSessionId = button?.dataset?.sessionId || sessionId;
       if (!grantKey || !ws || ws.readyState !== 1) return;
       button.disabled = true;
       button.textContent = '撤销中...';
-      ws.send(JSON.stringify({ type: 'revokePermissionGrant', grantKey }));
+      const payload = { type: 'revokePermissionGrant', grantKey, scope };
+      if (targetSessionId) payload.sessionId = targetSessionId;
+      ws.send(JSON.stringify(payload));
     }
     window.revokeGrant = revokeGrant;
 
@@ -2132,13 +2266,11 @@
         statusEl.className = 'connected';
         if (!isStreaming) sendBtn.disabled = false;
 
-        // 持久授权按 principal（webchat）展示，与 session 无关，连接后即拉取
-        requestPermissionGrants();
-
         // 刷新/重连时优先从 URL 读取 sessionId，确保加载正确会话
         const urlParams = new URLSearchParams(location.search);
         const sessionFromUrl = urlParams.get('session');
         if (sessionFromUrl) sessionId = sessionFromUrl;
+        requestPermissionGrants();
         if (sessionId) {
           ws.send(JSON.stringify({ type: 'loadHistory', sessionId, limit: 100 }));
           requestAuditEvents();
@@ -2290,6 +2422,22 @@
           }).join('');
           planEl.innerHTML = `<div class="tool-header">📝 <strong>${escapeHtml(msg.summary || '执行计划')}</strong></div>${items}`;
           messagesEl.appendChild(planEl);
+          messagesEl.scrollTop = messagesEl.scrollHeight;
+
+        } else if (msg.type === 'tool_plan_result') {
+          const task = ensureTaskState(msg.operationId);
+          if (task) {
+            task.status = msg.allowed ? 'running' : 'rejected';
+            task.summaryText = getPlanDecisionText(msg.allowed, msg.reason, msg.autoApproved);
+            renderTaskPanel();
+          }
+
+          const resultEl = document.createElement('div');
+          resultEl.className = 'tool-plan';
+          const icon = msg.allowed ? '✅' : '❌';
+          const text = getPlanDecisionBadge(Boolean(msg.allowed), msg.reason);
+          resultEl.innerHTML = `<div class="tool-header">${icon} <strong>${escapeHtml(text)}</strong></div><div style="margin-top:0.25rem;color:var(--text-muted)">第 ${Number(msg.round || 0)} 轮计划</div>`;
+          messagesEl.appendChild(resultEl);
           messagesEl.scrollTop = messagesEl.scrollHeight;
 
         } else if (msg.type === 'tool_call') {

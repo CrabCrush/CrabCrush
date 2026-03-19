@@ -14,6 +14,7 @@ import type { ConversationStore, PermissionGrant } from '../storage/database.js'
 import type { ToolRegistry } from '../tools/registry.js';
 import type {
   ConfirmationScope,
+  ToolFailureKind,
   ToolContext,
   ToolConfirmHandler,
   ToolExecutionPreview,
@@ -21,7 +22,7 @@ import type {
   ToolPlanPolicy,
 } from '../tools/types.js';
 import { looksLikeFileToolRequest } from '../tools/intent.js';
-import { getPrincipalKey, inferGrantResource } from '../permissions/utils.js';
+import { getPrincipalKey, inferGrantResource, WEBCHAT_DEFAULT_SENDER_ID } from '../permissions/utils.js';
 import { createDefaultPromptRegistry } from '../prompts/defaults.js';
 import type { PromptRegistry } from '../prompts/types.js';
 import {
@@ -39,6 +40,25 @@ export interface Session {
   messages: ChatMessage[];
   createdAt: number;
   lastActiveAt: number;
+}
+
+type ListedPermissionGrantScope = Exclude<ConfirmationScope, 'once'>;
+
+interface InMemoryPermissionGrant {
+  principalKey: string;
+  grantKey: string;
+  scope: ListedPermissionGrantScope;
+  resourceType: PermissionGrant['resourceType'];
+  resourceValue: string;
+  createdAt: number;
+  lastUsedAt: number;
+  revokedAt: null;
+  meta: Record<string, unknown>;
+}
+
+export interface ListedPermissionGrant extends Omit<PermissionGrant, 'scope'> {
+  scope: ListedPermissionGrantScope;
+  sessionId?: string;
 }
 
 export interface AgentRuntimeOptions {
@@ -73,6 +93,8 @@ export interface ToolCallEvent {
   args: Record<string, unknown>;
   result: string;
   success: boolean;
+  failureKind?: ToolFailureKind;
+  degradeToAdvice?: boolean;
 }
 
 export interface ToolPlanStep {
@@ -93,6 +115,15 @@ export interface ToolPlanEvent {
   steps: ToolPlanStep[];
 }
 
+export interface ToolPlanResultEvent {
+  type: 'tool_plan_result';
+  round: number;
+  operationId?: string;
+  allowed: boolean;
+  reason?: 'rejected' | 'timeout';
+  autoApproved?: boolean;
+}
+
 /** 流式控制事件（用于撤回已输出内容） */
 export interface StreamControlEvent {
   type: 'stream_control';
@@ -108,7 +139,14 @@ const TOOL_BLOCK_START = '__TOOL_CALL__\n';
 const TOOL_PLAN_BLOCK_START = '__TOOL_PLAN__\n';
 const TOOL_PLAN_RESULT_BLOCK_START = '__TOOL_PLAN_RESULT__\n';
 const TOOL_BLOCK_END = '\n__END__';
-function serializeToolBlock(t: { name: string; args: Record<string, unknown>; result: string; success: boolean }): string {
+function serializeToolBlock(t: {
+  name: string;
+  args: Record<string, unknown>;
+  result: string;
+  success: boolean;
+  failureKind?: ToolFailureKind;
+  degradeToAdvice?: boolean;
+}): string {
   return TOOL_BLOCK_START + JSON.stringify(t) + TOOL_BLOCK_END;
 }
 
@@ -116,17 +154,52 @@ function serializeToolPlanBlock(t: { round: number; summary: string; steps: Tool
   return TOOL_PLAN_BLOCK_START + JSON.stringify(t) + TOOL_BLOCK_END;
 }
 
-function serializeToolPlanResultBlock(t: { round: number; allowed: boolean }): string {
+function serializeToolPlanResultBlock(t: {
+  round: number;
+  allowed: boolean;
+  reason?: 'rejected' | 'timeout';
+  autoApproved?: boolean;
+}): string {
   return TOOL_PLAN_RESULT_BLOCK_START + JSON.stringify(t) + TOOL_BLOCK_END;
+}
+
+function describePlanDecision(reason?: 'rejected' | 'timeout'): {
+  summary: string;
+  fallback: string;
+} {
+  if (reason === 'timeout') {
+    return {
+      summary: '执行计划确认超时。',
+      fallback: '工具未执行：执行计划确认超时。我可以改为只提供纯文字方案，请重试。',
+    };
+  }
+  return {
+    summary: '用户拒绝批准本次执行计划。',
+    fallback: '工具未执行：用户拒绝批准本次执行计划。我可以改为只提供纯文字方案，请重试。',
+  };
 }
 
 function createOperationId(): string {
   return `op-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function parseToolBlocks(content: string): Array<{ name: string; args: Record<string, unknown>; result: string; success: boolean }> | null {
+export function parseToolBlocks(content: string): Array<{
+  name: string;
+  args: Record<string, unknown>;
+  result: string;
+  success: boolean;
+  failureKind?: ToolFailureKind;
+  degradeToAdvice?: boolean;
+}> | null {
   if (!content.startsWith(TOOL_BLOCK_START)) return null;
-  const blocks: Array<{ name: string; args: Record<string, unknown>; result: string; success: boolean }> = [];
+  const blocks: Array<{
+    name: string;
+    args: Record<string, unknown>;
+    result: string;
+    success: boolean;
+    failureKind?: ToolFailureKind;
+    degradeToAdvice?: boolean;
+  }> = [];
   let rest = content;
   while (rest.startsWith(TOOL_BLOCK_START)) {
     const endIdx = rest.indexOf(TOOL_BLOCK_END);
@@ -144,8 +217,7 @@ export function parseToolBlocks(content: string): Array<{ name: string; args: Re
 
 export class AgentRuntime {
   private sessions = new Map<string, Session>();
-  private sessionPermissionGrants = new Map<string, Set<string>>();
-  private sessionPrincipals = new Map<string, string>();
+  private sessionPermissionGrants = new Map<string, Map<string, InMemoryPermissionGrant>>();
   private router: ModelRouter;
   private prompts: PromptRegistry;
   private maxTokens: number;
@@ -181,13 +253,54 @@ export class AgentRuntime {
     return buildSystemPrompt(this.prompts, content);
   }
 
-  private getGrantSet(sessionId: string): Set<string> {
+  private getGrantMap(sessionId: string): Map<string, InMemoryPermissionGrant> {
     let grants = this.sessionPermissionGrants.get(sessionId);
     if (!grants) {
-      grants = new Set<string>();
+      grants = new Map<string, InMemoryPermissionGrant>();
       this.sessionPermissionGrants.set(sessionId, grants);
     }
     return grants;
+  }
+
+  private buildGrantMeta(details?: {
+    action?: string;
+    preview?: ToolExecutionPreview;
+  }): Record<string, unknown> {
+    return {
+      action: details?.action,
+      previewTitle: details?.preview?.title,
+      previewSummary: details?.preview?.summary,
+      targets: details?.preview?.targets,
+    };
+  }
+
+  private buildInMemoryGrant(
+    principalKey: string,
+    grantKey: string,
+    scope: ListedPermissionGrantScope,
+    details?: {
+      action?: string;
+      preview?: ToolExecutionPreview;
+    },
+  ): InMemoryPermissionGrant {
+    const resource = inferGrantResource(grantKey, details?.preview);
+    const now = Date.now();
+    return {
+      principalKey,
+      grantKey,
+      scope,
+      resourceType: resource.resourceType,
+      resourceValue: resource.resourceValue,
+      createdAt: now,
+      lastUsedAt: now,
+      revokedAt: null,
+      meta: this.buildGrantMeta(details),
+    };
+  }
+
+  private touchInMemoryGrant(sessionId: string, grantKey: string): void {
+    const grant = this.sessionPermissionGrants.get(sessionId)?.get(grantKey);
+    if (grant) grant.lastUsedAt = Date.now();
   }
 
   private hasPermissionGrant(
@@ -196,7 +309,8 @@ export class AgentRuntime {
     grantKey: string,
     options?: { touch?: boolean },
   ): boolean {
-    const inMemory = this.getGrantSet(sessionId).has(grantKey);
+    const inMemory = this.getGrantMap(sessionId).has(grantKey);
+    if (inMemory && options?.touch !== false) this.touchInMemoryGrant(sessionId, grantKey);
     const persisted = this.store?.hasActivePermissionGrant?.(principalKey, grantKey) ?? false;
     if (persisted && options?.touch !== false) this.store?.touchPermissionGrant?.(principalKey, grantKey);
     return inMemory || persisted;
@@ -206,14 +320,15 @@ export class AgentRuntime {
     sessionId: string,
     principalKey: string,
     grantKey: string,
-    scope: ConfirmationScope,
+    scope: ListedPermissionGrantScope,
     details?: {
       action?: string;
       preview?: ToolExecutionPreview;
     },
   ): void {
+    const inMemoryGrant = this.buildInMemoryGrant(principalKey, grantKey, scope, details);
     if (scope === 'session') {
-      this.getGrantSet(sessionId).add(grantKey);
+      this.getGrantMap(sessionId).set(grantKey, inMemoryGrant);
       this.auditLogger?.({ type: 'permission_grant_saved', conversationId: sessionId, principalKey, grantKey, scope });
       return;
     }
@@ -221,20 +336,14 @@ export class AgentRuntime {
     if (scope === 'persistent') {
       // 永久授权不仅要落库，也要立刻写入当前会话内存态，
       // 避免“刚点了永久允许，当前连接里下一次还要再问一遍”。
-      this.getGrantSet(sessionId).add(grantKey);
-      const resource = inferGrantResource(grantKey, details?.preview);
+      this.getGrantMap(sessionId).set(grantKey, inMemoryGrant);
       this.store?.savePermissionGrant?.({
         principalKey,
         grantKey,
         scope: 'persistent',
-        resourceType: resource.resourceType,
-        resourceValue: resource.resourceValue,
-        meta: {
-          action: details?.action,
-          previewTitle: details?.preview?.title,
-          previewSummary: details?.preview?.summary,
-          targets: details?.preview?.targets,
-        },
+        resourceType: inMemoryGrant.resourceType,
+        resourceValue: inMemoryGrant.resourceValue,
+        meta: inMemoryGrant.meta,
       });
       this.auditLogger?.({
         type: 'permission_grant_saved',
@@ -242,8 +351,8 @@ export class AgentRuntime {
         principalKey,
         grantKey,
         scope,
-        resourceType: resource.resourceType,
-        resourceValue: resource.resourceValue,
+        resourceType: inMemoryGrant.resourceType,
+        resourceValue: inMemoryGrant.resourceValue,
       });
     }
   }
@@ -311,6 +420,32 @@ export class AgentRuntime {
     };
   }
 
+  private inferLegacyFailureKind(result: { success: boolean; content: string }): ToolFailureKind | undefined {
+    if (result.success) return undefined;
+    const message = result.content || '';
+    if (message.includes('用户拒绝执行工具')) return 'rejected';
+    if (message.includes('确认超时')) return 'timeout';
+    if (message.includes('需要用户确认')) return 'confirmation_required';
+    return undefined;
+  }
+
+  private normalizeToolFailure(result: {
+    success: boolean;
+    content: string;
+    failureKind?: ToolFailureKind;
+    degradeToAdvice?: boolean;
+  }): {
+    failureKind?: ToolFailureKind;
+    degradeToAdvice: boolean;
+  } {
+    const failureKind = result.failureKind ?? this.inferLegacyFailureKind(result);
+    const degradeToAdvice = Boolean(result.degradeToAdvice)
+      || failureKind === 'rejected'
+      || failureKind === 'timeout'
+      || failureKind === 'confirmation_required';
+    return { failureKind, degradeToAdvice };
+  }
+
   /**
    * 用户拒绝执行后，自动降级成 advice-only 回复。
    * 这一步故意不再给模型 tools，避免它继续请求执行类动作。
@@ -345,6 +480,10 @@ export class AgentRuntime {
     // 这里只做“是否需要强制先走文件工具”的兜底判断，不把它当成真实语义理解。
     // 真正可靠的事实来源仍然必须是 read_file / list_files / write_file 的执行结果。
     return looksLikeFileToolRequest(userMessage);
+  }
+
+  private get modelSupportsToolCalls(): boolean {
+    return this.router.primarySupportsToolCalls !== false;
   }
 
   /**
@@ -384,16 +523,16 @@ export class AgentRuntime {
     senderId?: string,
     confirmToolCall?: ToolConfirmHandler,
     channel = 'webchat',
-  ): AsyncIterable<ChatChunk | ToolCallEvent | ToolPlanEvent | StreamControlEvent> {
-    const session = this.getOrCreateSession(sessionId, channel, senderId ?? '');
-    const principalKey = getPrincipalKey(channel, senderId ?? '');
-    this.sessionPrincipals.set(sessionId, principalKey);
+  ): AsyncIterable<ChatChunk | ToolCallEvent | ToolPlanEvent | ToolPlanResultEvent | StreamControlEvent> {
+    const actorId = senderId ?? (channel === 'webchat' ? WEBCHAT_DEFAULT_SENDER_ID : sessionId);
+    const session = this.getOrCreateSession(sessionId, channel, actorId);
+    const principalKey = getPrincipalKey(channel, actorId);
     const emitAudit = (event: { type: string; [key: string]: unknown }): void => {
       this.auditLogger?.({
         conversationId: sessionId,
         sessionId,
         channel,
-        senderId: senderId ?? sessionId,
+        senderId: actorId,
         principalKey,
         ...event,
       });
@@ -409,10 +548,22 @@ export class AgentRuntime {
 
     // 工具调用循环
     let toolRound = 0;
-    const accumulatedToolCalls: Array<{ name: string; args: Record<string, unknown>; result: string; success: boolean }> = [];
+    const accumulatedToolCalls: Array<{
+      name: string;
+      args: Record<string, unknown>;
+      result: string;
+      success: boolean;
+      failureKind?: ToolFailureKind;
+      degradeToAdvice?: boolean;
+    }> = [];
     let stopAfterToolRound = false;
     let stopReason: string | null = null;
     let fileToolReminderUsed = false;
+    const toolsEnabled = Boolean(this.toolRegistry && this.toolRegistry.size > 0 && this.modelSupportsToolCalls);
+
+    if (this.toolRegistry && this.toolRegistry.size > 0 && !toolsEnabled) {
+      emitAudit({ type: 'tool_capability_downgraded', reason: 'tool_call_unsupported' });
+    }
 
     while (toolRound <= MAX_TOOL_ROUNDS) {
       // 滑动窗口
@@ -420,7 +571,10 @@ export class AgentRuntime {
       const toolEnforcementHint = fileToolReminderUsed
         ? `\n${this.prompts.runtime.fileToolEnforcement}`
         : '';
-      const messages: ChatMessage[] = [{ role: 'system', content: systemPrompt + toolEnforcementHint }, ...recentMessages];
+      const capabilityHint = this.toolRegistry && this.toolRegistry.size > 0 && !toolsEnabled
+        ? `\n${this.prompts.runtime.modelCapabilityDegrade}`
+        : '';
+      const messages: ChatMessage[] = [{ role: 'system', content: systemPrompt + toolEnforcementHint + capabilityHint }, ...recentMessages];
 
       if (this.debug) {
         const historyCount = recentMessages.length;
@@ -436,10 +590,10 @@ export class AgentRuntime {
       }
 
       // 构建 chatOptions（带工具定义）
-      const isOwner = this.isOwner(senderId);
+      const isOwner = this.isOwner(actorId);
       const chatOptions: ChatOptions = { maxTokens: this.maxTokens, signal };
       // 如果有注册的工具，传给模型
-      if (this.toolRegistry && this.toolRegistry.size > 0) {
+      if (toolsEnabled && this.toolRegistry && this.toolRegistry.size > 0) {
         chatOptions.tools = this.toolRegistry.getDefinitionsForModel(isOwner);
       }
 
@@ -466,7 +620,7 @@ export class AgentRuntime {
 
       // 情况 1: 模型返回了纯文本回复（没有工具调用），正常结束
       if (!toolCalls || toolCalls.length === 0) {
-        if (toolRound === 0 && this.shouldRequireFileTool(userMessage)) {
+        if (toolRound === 0 && toolsEnabled && this.shouldRequireFileTool(userMessage)) {
           if (!fileToolReminderUsed) {
             fileToolReminderUsed = true;
             if (streamedContent || fullContent) {
@@ -521,14 +675,14 @@ export class AgentRuntime {
               action: req.action,
               grantKey: req.grantKey,
             });
-            return true;
+            return { allow: true };
           }
 
           const decision = await confirmToolCall({
             name: req.action,
             args: req.params ?? {},
             sessionId,
-            senderId: senderId ?? sessionId,
+            senderId: actorId,
             operationId,
             stepIndex,
             kind: 'permission_request',
@@ -546,25 +700,29 @@ export class AgentRuntime {
             action: req.action,
             allowed: decision.allow,
             scope: decision.scope,
+            reason: decision.reason,
             grantKey: req.grantKey,
           });
 
           if (decision.allow && req.grantKey) {
-            this.rememberPermissionGrant(
-              sessionId,
-              principalKey,
-              req.grantKey,
-              decision.scope ?? req.defaultScope ?? 'once',
-              { action: req.action, preview: req.preview },
-            );
+            const rememberedScope = decision.scope ?? req.defaultScope ?? 'once';
+            if (rememberedScope === 'session' || rememberedScope === 'persistent') {
+              this.rememberPermissionGrant(
+                sessionId,
+                principalKey,
+                req.grantKey,
+                rememberedScope,
+                { action: req.action, preview: req.preview },
+              );
+            }
           }
-          return decision.allow;
+          return decision;
         }
         : undefined;
 
       const baseToolContext: ToolContext = {
         channel,
-        senderId: senderId ?? sessionId,
+        senderId: actorId,
         principalKey,
         isOwner,
         sessionId,
@@ -577,7 +735,11 @@ export class AgentRuntime {
           grantKey: string,
           scope: ConfirmationScope,
           details?: { action?: string; preview?: ToolExecutionPreview },
-        ) => this.rememberPermissionGrant(sessionId, principalKey, grantKey, scope, details),
+        ) => {
+          if (scope === 'session' || scope === 'persistent') {
+            this.rememberPermissionGrant(sessionId, principalKey, grantKey, scope, details);
+          }
+        },
         audit: (event) => emitAudit({ operationId, ...event }),
         userMessage,
       };
@@ -610,7 +772,7 @@ export class AgentRuntime {
             steps: planSteps.map((step) => ({ index: step.index, name: step.name, args: step.args })),
           },
           sessionId,
-          senderId: senderId ?? sessionId,
+          senderId: actorId,
           operationId,
           kind: 'plan',
           message: this.prompts.runtime.planApprovalMessage,
@@ -624,19 +786,31 @@ export class AgentRuntime {
           operationId,
           allowed: planDecision.allow,
           round: toolRound,
+          reason: planDecision.reason,
         });
         this.store?.saveMessage(
           sessionId,
           'assistant',
-          serializeToolPlanResultBlock({ round: toolRound, allowed: planDecision.allow }),
+          serializeToolPlanResultBlock({
+            round: toolRound,
+            allowed: planDecision.allow,
+            reason: planDecision.reason,
+          }),
         );
+        yield {
+          type: 'tool_plan_result',
+          round: toolRound,
+          operationId,
+          allowed: planDecision.allow,
+          reason: planDecision.reason,
+        };
 
         if (!planDecision.allow) {
-          const reason = '用户拒绝批准本次执行计划。';
+          const planFailure = describePlanDecision(planDecision.reason);
           try {
-            yield* this.streamAdviceOnlyReply(session, sessionId, systemPrompt, reason, signal);
+            yield* this.streamAdviceOnlyReply(session, sessionId, systemPrompt, planFailure.summary, signal);
           } catch {
-            const fallbackMsg = '工具未执行：用户拒绝批准本次执行计划。我可以改为只提供纯文字方案，请重试。';
+            const fallbackMsg = planFailure.fallback;
             session.messages.push({ role: 'assistant', content: fallbackMsg });
             this.store?.saveMessage(sessionId, 'assistant', fallbackMsg);
             yield { content: fallbackMsg, done: false };
@@ -655,8 +829,15 @@ export class AgentRuntime {
         this.store?.saveMessage(
           sessionId,
           'assistant',
-          serializeToolPlanResultBlock({ round: toolRound, allowed: true }),
+          serializeToolPlanResultBlock({ round: toolRound, allowed: true, autoApproved: true }),
         );
+        yield {
+          type: 'tool_plan_result',
+          round: toolRound,
+          operationId,
+          allowed: true,
+          autoApproved: true,
+        };
       }
 
       const assistantMsg: ChatMessage = { role: 'assistant', content: '', tool_calls: toolCalls };
@@ -677,6 +858,7 @@ export class AgentRuntime {
         const result = this.toolRegistry
           ? await this.toolRegistry.execute(tc.function.name, args, toolContext)
           : { success: false, content: '工具系统未启用' };
+        const failureState = this.normalizeToolFailure(result);
 
         emitAudit({
           type: 'tool_result',
@@ -687,22 +869,38 @@ export class AgentRuntime {
           args,
           result: result.content,
           success: result.success,
+          failureKind: failureState.failureKind,
+          degradeToAdvice: failureState.degradeToAdvice,
         });
 
-        if (!result.success) {
-          const msg = result.content || '';
-          if (msg.includes('用户拒绝执行工具') || msg.includes('确认超时') || msg.includes('需要用户确认')) {
-            stopAfterToolRound = true;
-            stopReason = msg;
-          }
+        if (!result.success && failureState.degradeToAdvice) {
+          stopAfterToolRound = true;
+          stopReason = result.content || stopReason;
         }
 
         if (this.debug) {
           console.log(`  ← ${tc.function.name}: ${result.success ? '✓' : '✗'} ${result.content.slice(0, 100)}`);
         }
 
-        yield { type: 'tool_call', operationId, stepIndex, name: tc.function.name, args, result: result.content, success: result.success };
-        accumulatedToolCalls.push({ name: tc.function.name, args, result: result.content, success: result.success });
+        yield {
+          type: 'tool_call',
+          operationId,
+          stepIndex,
+          name: tc.function.name,
+          args,
+          result: result.content,
+          success: result.success,
+          failureKind: failureState.failureKind,
+          degradeToAdvice: failureState.degradeToAdvice,
+        };
+        accumulatedToolCalls.push({
+          name: tc.function.name,
+          args,
+          result: result.content,
+          success: result.success,
+          failureKind: failureState.failureKind,
+          degradeToAdvice: failureState.degradeToAdvice,
+        });
 
         const toolMsg: ChatMessage = { role: 'tool', content: result.content, tool_call_id: tc.id };
         session.messages.push(toolMsg);
@@ -771,32 +969,82 @@ export class AgentRuntime {
       return this.store.getAllMessages(sessionId).map(m => ({ role: m.role as ChatMessage['role'], content: m.content }));
     }
     const session = this.sessions.get(sessionId);
-    return session?.messages ?? [];
+    const messages = session?.messages ?? [];
+    if (limit && limit > 0) {
+      const safeOffset = Math.max(0, offset ?? 0);
+      const end = Math.max(0, messages.length - safeOffset);
+      const start = Math.max(0, end - limit);
+      return messages.slice(start, end);
+    }
+    return messages;
   }
 
   getAuditTrail(sessionId: string, limit = 200, offset = 0) {
     return this.store?.listAuditEvents?.(sessionId, limit, offset) ?? [];
   }
 
-  listPermissionGrants(channel = 'webchat', senderId = ''): PermissionGrant[] {
+  listPermissionGrants(channel = 'webchat', senderId = '', sessionId?: string): ListedPermissionGrant[] {
     const principalKey = getPrincipalKey(channel, senderId);
-    return this.store?.listPermissionGrants?.(principalKey) ?? [];
+    const persistentGrants = (this.store?.listPermissionGrants?.(principalKey) ?? []).map((grant) => ({ ...grant }));
+    const inMemoryGrants = sessionId
+      ? [...(this.sessionPermissionGrants.get(sessionId)?.values() ?? [])]
+        .filter((grant) => grant.principalKey === principalKey)
+        .filter((grant) => grant.scope === 'session' || !this.store)
+        .map((grant) => ({ ...grant, sessionId }))
+      : [];
+    return [...inMemoryGrants, ...persistentGrants].sort((a, b) => {
+      if (a.scope !== b.scope) return a.scope === 'session' ? -1 : 1;
+      return b.lastUsedAt - a.lastUsedAt;
+    });
   }
 
-  revokePermissionGrant(grantKey: string, channel = 'webchat', senderId = ''): boolean {
+  revokePermissionGrant(
+    grantKey: string,
+    scope: ListedPermissionGrantScope,
+    channel = 'webchat',
+    senderId = '',
+    sessionId?: string,
+  ): boolean {
     const principalKey = getPrincipalKey(channel, senderId);
-    const revoked = this.store?.revokePermissionGrant?.(principalKey, grantKey) ?? false;
-    if (!revoked) return false;
-    for (const [sessionId, grants] of this.sessionPermissionGrants.entries()) {
-      if (this.sessionPrincipals.get(sessionId) !== principalKey) continue;
+    if (scope === 'session') {
+      if (!sessionId) return false;
+      const grants = this.sessionPermissionGrants.get(sessionId);
+      if (!grants) return false;
+      const grant = grants?.get(grantKey);
+      if (!grant || grant.principalKey !== principalKey || grant.scope !== 'session') return false;
       grants.delete(grantKey);
+      if (grants.size === 0) this.sessionPermissionGrants.delete(sessionId);
+      this.auditLogger?.({
+        type: 'permission_grant_revoked',
+        conversationId: sessionId,
+        sessionId,
+        principalKey,
+        channel,
+        senderId,
+        grantKey,
+        scope,
+      });
+      return true;
     }
+
+    const revoked = this.store?.revokePermissionGrant?.(principalKey, grantKey) ?? false;
+    let revokedInMemory = false;
+    for (const [grantSessionId, grants] of this.sessionPermissionGrants.entries()) {
+      const grant = grants.get(grantKey);
+      if (!grant || grant.principalKey !== principalKey || grant.scope !== 'persistent') continue;
+      grants.delete(grantKey);
+      if (grants.size === 0) this.sessionPermissionGrants.delete(grantSessionId);
+      revokedInMemory = true;
+    }
+    const revokeSucceeded = this.store ? revoked : revokedInMemory;
+    if (!revokeSucceeded) return false;
     this.auditLogger?.({
       type: 'permission_grant_revoked',
       principalKey,
       channel,
       senderId,
       grantKey,
+      scope,
     });
     return true;
   }

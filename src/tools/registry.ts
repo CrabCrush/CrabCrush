@@ -123,7 +123,12 @@ export class ToolRegistry {
             senderId: context.senderId,
             kind: 'confirm',
           });
-          return { success: false, content: `工具 "${name}" 需要用户确认，当前通道不支持确认。` };
+          return {
+            success: false,
+            content: `工具 "${name}" 需要用户确认，当前通道不支持确认。`,
+            failureKind: 'confirmation_required',
+            degradeToAdvice: true,
+          };
         }
 
         let decision;
@@ -131,7 +136,11 @@ export class ToolRegistry {
           decision = await context.confirm(confirmRequest);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          return { success: false, content: `确认失败: ${message}` };
+          return {
+            success: false,
+            content: `确认失败: ${message}`,
+            failureKind: 'confirmation_failed',
+          };
         }
 
         context.audit?.({
@@ -145,7 +154,14 @@ export class ToolRegistry {
         });
 
         if (!decision.allow) {
-          return { success: false, content: `用户拒绝执行工具 "${name}"` };
+          return {
+            success: false,
+            content: decision.reason === 'timeout'
+              ? `确认超时，已拒绝执行工具 "${name}"`
+              : `用户拒绝执行工具 "${name}"`,
+            failureKind: decision.reason === 'timeout' ? 'timeout' : 'rejected',
+            degradeToAdvice: true,
+          };
         }
 
         rememberGrant(context, confirmRequest.grantKey, decision.scope ?? confirmRequest.defaultScope, {
@@ -159,7 +175,7 @@ export class ToolRegistry {
       return await tool.execute(args, context);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return { success: false, content: `工具执行失败: ${message}` };
+      return { success: false, content: `工具执行失败: ${message}`, failureKind: 'error' };
     }
   }
 

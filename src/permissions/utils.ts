@@ -1,6 +1,7 @@
 import type { ToolExecutionPreview } from '../tools/types.js';
 
 export type GrantResourceType = 'path' | 'domain' | 'database' | 'other';
+export const WEBCHAT_DEFAULT_SENDER_ID = 'webchat:default';
 
 /**
  * 计算授权主体：
@@ -8,7 +9,7 @@ export type GrantResourceType = 'path' | 'domain' | 'database' | 'other';
  * - 其他渠道按 channel + senderId 区分
  */
 export function getPrincipalKey(channel = 'webchat', senderId = ''): string {
-  if (channel === 'webchat') return 'webchat:default';
+  if (channel === 'webchat') return WEBCHAT_DEFAULT_SENDER_ID;
   return `${channel}:${senderId || 'anonymous'}`;
 }
 
@@ -24,6 +25,12 @@ export function inferGrantResource(
 
   if (grantKey.startsWith('web:')) {
     return { resourceType: 'domain', resourceValue: grantKey.slice('web:'.length) || firstTarget };
+  }
+  if (grantKey.startsWith('network:search:')) {
+    return {
+      resourceType: 'domain',
+      resourceValue: grantKey.slice('network:search:'.length).replaceAll('|', ', ') || firstTarget,
+    };
   }
   if (grantKey.startsWith('network:')) {
     return { resourceType: 'domain', resourceValue: firstTarget || grantKey.slice('network:'.length) };

@@ -3,11 +3,11 @@ import { dirname, join } from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyWebSocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
-import type { AgentRuntime, ToolCallEvent, ToolPlanEvent, StreamControlEvent } from '../agent/runtime.js';
+import type { AgentRuntime, ToolCallEvent, ToolPlanEvent, ToolPlanResultEvent, StreamControlEvent } from '../agent/runtime.js';
 import type { ToolConfirmDecision, ToolConfirmHandler } from '../tools/types.js';
 import { estimateCost } from '../models/pricing.js';
 import type { ChatChunk } from '../models/provider.js';
-import { getPrincipalKey } from '../permissions/utils.js';
+import { getPrincipalKey, WEBCHAT_DEFAULT_SENDER_ID } from '../permissions/utils.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -16,6 +16,8 @@ export interface GatewayOptions {
   bind?: 'loopback' | 'all';
   logger?: boolean;
   agent?: AgentRuntime;
+  /** WebChat 工具/计划确认超时时间（毫秒） */
+  confirmTimeoutMs?: number;
   /** 访问令牌，设置后 WebChat 和 WebSocket 需要 ?token=xxx */
   token?: string;
   /** 审计日志回调（可选） */
@@ -81,6 +83,7 @@ export function createGateway(options: GatewayOptions = {}): FastifyInstance {
 export async function startGateway(options: GatewayOptions = {}) {
   const port = options.port ?? 18790;
   const host = options.bind === 'all' ? '0.0.0.0' : '127.0.0.1';
+  const confirmTimeoutMs = options.confirmTimeoutMs ?? 60_000;
   const app = createGateway(options);
   const audit = options.auditLogger;
 
@@ -124,7 +127,8 @@ export async function startGateway(options: GatewayOptions = {}) {
     const agent = options.agent;
 
     app.get('/ws', { websocket: true }, (socket, req) => {
-      const currentPrincipalKey = () => getPrincipalKey('webchat');
+      const currentSenderId = () => WEBCHAT_DEFAULT_SENDER_ID;
+      const currentPrincipalKey = () => getPrincipalKey('webchat', currentSenderId());
       // Token 校验
       if (!validateToken(req.query as Record<string, unknown>)) {
         socket.send(JSON.stringify({ type: 'error', message: '无效的访问令牌' }));
@@ -145,7 +149,7 @@ export async function startGateway(options: GatewayOptions = {}) {
 
       const requestConfirm: ToolConfirmHandler = async (request) => {
         const id = `confirm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        const timeoutMs = 30_000;
+        const timeoutMs = confirmTimeoutMs;
         audit?.({
           type: 'tool_confirm_request',
           conversationId: sessionId,
@@ -160,7 +164,7 @@ export async function startGateway(options: GatewayOptions = {}) {
         return await new Promise<ToolConfirmDecision>((resolve) => {
           const timeout = setTimeout(() => {
             pendingConfirms.delete(id);
-            resolve({ allow: false, scope: request.defaultScope });
+            resolve({ allow: false, scope: request.defaultScope, reason: 'timeout' });
           }, timeoutMs);
 
           pendingConfirms.set(id, { resolve, timeout, name: request.name, operationId: request.operationId, stepIndex: request.stepIndex });
@@ -195,7 +199,7 @@ export async function startGateway(options: GatewayOptions = {}) {
         currentAbort?.abort();
         for (const [id, pending] of pendingConfirms.entries()) {
           clearTimeout(pending.timeout);
-          pending.resolve({ allow: false });
+          pending.resolve({ allow: false, reason: 'rejected' });
           pendingConfirms.delete(id);
         }
       });
@@ -213,8 +217,9 @@ export async function startGateway(options: GatewayOptions = {}) {
               clearTimeout(pending.timeout);
               pendingConfirms.delete(msg.id);
               const decision: ToolConfirmDecision = {
-                allow: Boolean(msg.allow),
+                allow: msg.allow === true,
                 scope: msg.scope === 'session' ? 'session' : msg.scope === 'persistent' ? 'persistent' : 'once',
+                reason: msg.allow ? undefined : msg.reason === 'timeout' ? 'timeout' : 'rejected',
               };
               audit?.({
                 type: 'tool_confirm_result',
@@ -224,6 +229,7 @@ export async function startGateway(options: GatewayOptions = {}) {
                 name: pending.name,
                 allowed: decision.allow,
                 scope: decision.scope,
+                reason: decision.reason,
                 operationId: pending.operationId,
                 stepIndex: pending.stepIndex,
               });
@@ -242,9 +248,15 @@ export async function startGateway(options: GatewayOptions = {}) {
           if (msg.type === 'loadHistory') {
             const limit = typeof msg.limit === 'number' ? msg.limit : 100;
             const offset = typeof msg.offset === 'number' ? msg.offset : 0;
-            const history = agent.getHistory(sessionId, limit, offset);
-            const hasMore = history.length >= limit;
-            socket.send(JSON.stringify({ type: 'history', sessionId, messages: history, offset, hasMore }));
+            if (limit > 0) {
+              const history = agent.getHistory(sessionId, limit + 1, offset);
+              const hasMore = history.length > limit;
+              const messages = hasMore ? history.slice(1) : history;
+              socket.send(JSON.stringify({ type: 'history', sessionId, messages, offset, hasMore }));
+            } else {
+              const history = agent.getHistory(sessionId, limit, offset);
+              socket.send(JSON.stringify({ type: 'history', sessionId, messages: history, offset, hasMore: false }));
+            }
             return;
           }
 
@@ -257,20 +269,21 @@ export async function startGateway(options: GatewayOptions = {}) {
           }
 
           if (msg.type === 'loadPermissionGrants') {
-            const grants = agent.listPermissionGrants('webchat');
+            const grants = agent.listPermissionGrants('webchat', currentSenderId(), sessionId);
             socket.send(JSON.stringify({ type: 'permission_grants', grants }));
             return;
           }
 
           if (msg.type === 'revokePermissionGrant') {
             const grantKey = typeof msg.grantKey === 'string' ? msg.grantKey : '';
+            const scope = msg.scope === 'session' ? 'session' : 'persistent';
             if (!grantKey) {
               socket.send(JSON.stringify({ type: 'error', message: '缺少 grantKey' }));
               return;
             }
-            const revoked = agent.revokePermissionGrant(grantKey, 'webchat');
-            socket.send(JSON.stringify({ type: 'permission_grant_revoked', grantKey, revoked }));
-            const grants = agent.listPermissionGrants('webchat');
+            const revoked = agent.revokePermissionGrant(grantKey, scope, 'webchat', currentSenderId(), sessionId);
+            socket.send(JSON.stringify({ type: 'permission_grant_revoked', grantKey, scope, revoked }));
+            const grants = agent.listPermissionGrants('webchat', currentSenderId(), sessionId);
             socket.send(JSON.stringify({ type: 'permission_grants', grants }));
             return;
           }
@@ -304,7 +317,7 @@ export async function startGateway(options: GatewayOptions = {}) {
               conversationId: sessionId,
               sessionId,
               principalKey: currentPrincipalKey(),
-              senderId: sessionId,
+              senderId: currentSenderId(),
               ip,
               length: String(msg.content).length,
             });
@@ -318,8 +331,8 @@ export async function startGateway(options: GatewayOptions = {}) {
 
             try {
               // 流式回复（支持 ChatChunk 和 ToolCallEvent 两种事件）
-              // WebChat 用 sessionId 作为 senderId（DEC-026 Owner 判断）
-              for await (const event of agent.chat(sessionId, msg.content, abort.signal, sessionId, requestConfirm, 'webchat')) {
+              // WebChat 使用固定本地主体 ID，避免 owner 判断绑定随机 sessionId。
+              for await (const event of agent.chat(sessionId, msg.content, abort.signal, currentSenderId(), requestConfirm, 'webchat')) {
                 if (socket.readyState !== 1) break;
 
                 if ('type' in event && (event as StreamControlEvent).type === 'stream_control') {
@@ -340,6 +353,19 @@ export async function startGateway(options: GatewayOptions = {}) {
                   continue;
                 }
 
+                if ('type' in event && (event as ToolPlanResultEvent).type === 'tool_plan_result') {
+                  const planResultEvent = event as ToolPlanResultEvent;
+                  socket.send(JSON.stringify({
+                    type: 'tool_plan_result',
+                    operationId: planResultEvent.operationId,
+                    round: planResultEvent.round,
+                    allowed: planResultEvent.allowed,
+                    reason: planResultEvent.reason,
+                    autoApproved: planResultEvent.autoApproved,
+                  }));
+                  continue;
+                }
+
                 // 工具调用事件
                 if ('type' in event && (event as ToolCallEvent).type === 'tool_call') {
                   const toolEvent = event as ToolCallEvent;
@@ -351,6 +377,8 @@ export async function startGateway(options: GatewayOptions = {}) {
                     args: toolEvent.args,
                     result: toolEvent.result,
                     success: toolEvent.success,
+                    failureKind: toolEvent.failureKind,
+                    degradeToAdvice: toolEvent.degradeToAdvice,
                   }));
                   continue;
                 }

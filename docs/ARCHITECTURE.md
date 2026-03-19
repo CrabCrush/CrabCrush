@@ -49,7 +49,7 @@
 └─────────────────────────────────────────────────────┘
 ```
 
-**当前实现**：Gateway 为 Fastify HTTP + WebSocket + 静态文件；Session 由 Agent Runtime 管理；对话持久化到 SQLite。详见 `src/`。
+**当前实现**：Gateway 为 Fastify HTTP + WebSocket + 静态文件；Session 由 Agent Runtime 管理；对话与审计事件持久化到 SQLite，并保留本地审计日志。详见 `src/`。
 
 ## 二、核心模块职责
 
@@ -59,9 +59,9 @@
 | **Channel** | 消息标准化、发送；钉钉 Stream / 飞书 WebSocket / Webhook 两种模式 | DEC-003 |
 | **Agent Runtime** | 会话管理、多轮上下文、模型调用、工具执行 | — |
 | **Model Layer** | OpenAI 兼容适配器，baseURL + apiKey 接入多模型 | DEC-009 |
-| **Tools** | Function Calling、owner 权限、confirmRequired | DEC-026 |
+| **Tools** | Function Calling、owner 权限、confirmRequired、permission_request、授权复用 | DEC-026 |
 
-**渠道流式策略**：钉钉不支持编辑已发消息 → 等流式结束后一次性发送；WebChat 支持流式逐字。
+**渠道流式策略**：WebChat 支持流式逐字；钉钉不支持编辑已发消息，因此通过 Block Streaming 按块分片发送，减少整条生成完成前的等待。
 
 ## 三、数据存储
 
@@ -69,8 +69,8 @@
 ~/.crabcrush/
 ├── config/crabcrush.yaml    # 主配置（DEC-022）
 ├── data/conversations.db    # 对话历史（SQLite）
-├── logs/                    # 日志（DEC-024，Phase 2）
-├── workspace/               # 工作区（2a.5）
+├── logs/                    # 本地审计日志（如 audit.log）
+├── workspace/               # 工作区 prompt / 人格化文件
 └── credentials/             # 凭证（Phase 2+）
 ```
 
@@ -96,7 +96,7 @@
 
 ## 五、安全与安装
 
-- **安全**：Token 认证、owner 工具权限、confirmRequired（2a.2）
+- **安全**：Token 认证、owner 工具权限、confirmRequired、permission_request、范围授权、审计回放、拒绝后降级
 - **安装**：`pnpm install && pnpm dev`；Docker 见 ROADMAP Phase 2c
 
 ## 六、与 OpenClaw 对比

@@ -4,14 +4,14 @@
  */
 
 import type { ChatChunk } from '../models/provider.js';
-import type { ToolCallEvent, ToolPlanEvent, StreamControlEvent } from '../agent/runtime.js';
+import type { ToolCallEvent, ToolPlanEvent, ToolPlanResultEvent, StreamControlEvent } from '../agent/runtime.js';
 import type { ToolConfirmHandler } from '../tools/types.js';
 
 /**
  * 聊天处理函数
  * 对应 AgentRuntime.chat() 的签名
  * 返回 ChatChunk（文本）或工具执行事件
- * @param senderId - 发送者 ID（钉钉 userId / WebChat sessionId），用于 Owner 权限判断（DEC-026）
+ * @param senderId - 发送者 ID（钉钉 userId / WebChat 固定本地主体 ID），用于 Owner 权限判断（DEC-026）
  */
 export type ChatHandler = (
   sessionId: string,
@@ -20,7 +20,7 @@ export type ChatHandler = (
   senderId?: string,
   confirmToolCall?: ToolConfirmHandler,
   channel?: string,
-) => AsyncIterable<ChatChunk | ToolCallEvent | ToolPlanEvent | StreamControlEvent>;
+) => AsyncIterable<ChatChunk | ToolCallEvent | ToolPlanEvent | ToolPlanResultEvent | StreamControlEvent>;
 
 /**
  * 渠道适配器基础接口

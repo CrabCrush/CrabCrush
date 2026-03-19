@@ -7,6 +7,16 @@
 
 import type { ToolDefinition } from '../tools/types.js';
 
+export class ModelApiError extends Error {
+  statusCode?: number;
+
+  constructor(message: string, options: { statusCode?: number } = {}) {
+    super(message);
+    this.name = 'ModelApiError';
+    this.statusCode = options.statusCode;
+  }
+}
+
 // ── 消息类型 ──
 
 export interface ChatMessage {
@@ -65,6 +75,7 @@ export class OpenAICompatibleProvider {
     private readonly baseURL: string,
     private readonly apiKey: string,
     private readonly defaultModel: string,
+    public readonly supportsToolCalls = true,
   ) {}
 
   /**
@@ -173,19 +184,23 @@ export class OpenAICompatibleProvider {
         if (response.status < 500) {
           const errorText = await response.text();
           const msg = this.formatApiError(response.status, errorText);
-          throw new Error(msg);
+          throw new ModelApiError(msg, { statusCode: response.status });
         }
 
         // 5xx — 服务端问题，可重试
         const errorText = await response.text();
-        lastError = new Error(
+        lastError = new ModelApiError(
           `模型 API 服务端错误 (${response.status}): ${errorText.slice(0, 200)}`,
+          { statusCode: response.status },
         );
       } catch (err) {
         clearTimeout(timeout);
         externalSignal?.removeEventListener('abort', onExternalAbort);
 
         if (err instanceof Error) {
+          if (err instanceof ModelApiError && typeof err.statusCode === 'number' && err.statusCode < 500) {
+            throw err;
+          }
           if (externalSignal?.aborted) {
             throw new Error('生成已中断');
           }

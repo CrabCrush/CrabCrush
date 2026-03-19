@@ -313,7 +313,41 @@ class SafeAutoRouter {
   }
 }
 
-function createRuntime(confirmRequired = true): AgentRuntime {
+class CapabilityDegradeRouter {
+  readonly primarySupportsToolCalls = false;
+
+  async *chat(messages: ChatMessage[], options: ChatOptions = {}): AsyncIterable<ChatChunk> {
+    const systemPrompt = messages[0]?.content || '';
+    if (options.tools && options.tools.length > 0) {
+      yield {
+        content: '',
+        done: true,
+        model: 'mock-model',
+        toolCalls: [
+          {
+            id: 'call-capability-1',
+            type: 'function',
+            function: {
+              name: 'write_like',
+              arguments: JSON.stringify({ path: 'workspace/notes.md', content: 'hello' }),
+            },
+          },
+        ],
+      };
+      return;
+    }
+
+    yield {
+      content: systemPrompt.includes('当前模型未启用 tool/function calling 能力')
+        ? '当前模型不支持动手执行，我先给你纯文字方案。'
+        : '普通回复',
+      done: false,
+    };
+    yield { content: '', done: true, model: 'mock-model' };
+  }
+}
+
+function createRuntime(confirmRequired = true, ownerIds = ['owner-1']): AgentRuntime {
   const registry = new ToolRegistry();
   const tool: Tool = {
     definition: {
@@ -340,7 +374,7 @@ function createRuntime(confirmRequired = true): AgentRuntime {
     systemPrompt: 'test',
     maxTokens: 1024,
     toolRegistry: registry,
-    ownerIds: ['owner-1'],
+    ownerIds,
   });
 }
 
@@ -716,7 +750,107 @@ describe('AgentRuntime tool plan', () => {
 
     expect(toolCall?.success).toBe(false);
     expect(toolCall?.result).toContain('用户拒绝执行工具');
+    expect(toolCall?.failureKind).toBe('rejected');
+    expect(toolCall?.degradeToAdvice).toBe(true);
     expect(adviceChunk).toBeTruthy();
+  });
+
+  it('degrades with a structured confirmation_required failure when the channel cannot confirm', async () => {
+    const runtime = createRuntime(true);
+    const events: Array<unknown> = [];
+
+    for await (const event of runtime.chat(
+      'sess-missing-confirm',
+      '请保存到文件',
+      undefined,
+      'owner-1',
+    )) {
+      events.push(event);
+    }
+
+    const toolCall = events.find((event): event is ToolCallEvent =>
+      typeof event === 'object' && event !== null && 'type' in event && (event as { type: string }).type === 'tool_call');
+    const adviceChunk = events.find((event): event is ChatChunk =>
+      typeof event === 'object' && event !== null && 'content' in event && (event as ChatChunk).content.includes('不动手的方案'));
+
+    expect(toolCall?.success).toBe(false);
+    expect(toolCall?.failureKind).toBe('confirmation_required');
+    expect(toolCall?.degradeToAdvice).toBe(true);
+    expect(adviceChunk).toBeTruthy();
+  });
+
+  it('treats WebChat as a stable local owner principal when senderId is omitted', async () => {
+    const runtime = createRuntime(true, ['webchat:default']);
+    const events: Array<unknown> = [];
+
+    for await (const event of runtime.chat(
+      'sess-webchat-owner',
+      '请保存到文件',
+      undefined,
+      undefined,
+      async () => ({ allow: true, scope: 'once' }),
+      'webchat',
+    )) {
+      events.push(event);
+    }
+
+    const toolCall = events.find((event): event is ToolCallEvent =>
+      typeof event === 'object' && event !== null && 'type' in event && (event as { type: string }).type === 'tool_call');
+
+    expect(toolCall).toMatchObject({
+      type: 'tool_call',
+      name: 'write_like',
+      success: true,
+    });
+  });
+
+  it('falls back to text-only guidance when the current model does not support tool calling', async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      definition: {
+        name: 'write_like',
+        description: 'mock write tool',
+        parameters: { type: 'object', properties: {} },
+      },
+      permission: 'owner',
+      confirmRequired: true,
+      buildConfirmRequest: () => ({
+        preview: {
+          title: '写入文件',
+          summary: '将写入 workspace/notes.md',
+          riskLevel: 'high',
+          targets: ['workspace/notes.md'],
+        },
+      }),
+      execute: async () => ({ success: true, content: 'write ok' }),
+    } as Tool);
+
+    const runtime = new AgentRuntime({
+      router: new CapabilityDegradeRouter() as never,
+      systemPrompt: 'test',
+      maxTokens: 1024,
+      toolRegistry: registry,
+      ownerIds: ['owner-1'],
+    });
+
+    const events: Array<unknown> = [];
+    for await (const event of runtime.chat(
+      'sess-capability-degrade',
+      '请保存到文件',
+      undefined,
+      'owner-1',
+      async () => ({ allow: true, scope: 'once' }),
+    )) {
+      events.push(event);
+    }
+
+    const toolCall = events.find((event): event is ToolCallEvent =>
+      typeof event === 'object' && event !== null && 'type' in event && (event as { type: string }).type === 'tool_call');
+    const textChunk = events.find((event): event is ChatChunk =>
+      typeof event === 'object' && event !== null && 'content' in event && (event as ChatChunk).content.includes('纯文字方案'));
+
+    expect(toolCall).toBeUndefined();
+    expect(textChunk).toBeTruthy();
   });
 
   it('persists tool plan and plan approval result into conversation history', async () => {
@@ -739,6 +873,27 @@ describe('AgentRuntime tool plan', () => {
     expect(planBlock?.content).toContain('"summary":"准备执行 1 个步骤"');
     expect(resultBlock).toBeTruthy();
     expect(resultBlock?.content).toContain('"allowed":true');
+  });
+
+  it('persists plan timeout reason into audit blocks when plan approval times out', async () => {
+    const { runtime, savedMessages } = createRuntimeWithStore(false);
+
+    for await (const event of runtime.chat(
+      'sess-plan-timeout',
+      '请保存到文件',
+      undefined,
+      'owner-1',
+      async (request) => request.kind === 'plan'
+        ? { allow: false, scope: 'once', reason: 'timeout' }
+        : { allow: true, scope: 'once' },
+    )) {
+      void event;
+    }
+
+    const resultBlock = savedMessages.find((message) => message.content.startsWith('__TOOL_PLAN_RESULT__\n'));
+    expect(resultBlock).toBeTruthy();
+    expect(resultBlock?.content).toContain('"reason":"timeout"');
+    expect(savedMessages.some((message) => message.role === 'assistant')).toBe(true);
   });
 
   it('persists channel and sender metadata when creating a conversation', async () => {
@@ -923,7 +1078,7 @@ describe('AgentRuntime tool plan', () => {
         execute: async (args, context) => {
           const grantKey = `file:list:${String(args.path || '')}`;
           if (!context.hasPermissionGrant?.(grantKey)) {
-            const allowed = await context.requestPermission?.({
+            const decision = await context.requestPermission?.({
               action: 'list_files',
               message: `是否允许扫描该目录？\n${String(args.path || '')}`,
               params: args,
@@ -937,7 +1092,14 @@ describe('AgentRuntime tool plan', () => {
                 targets: [String(args.path || '')],
               },
             });
-            if (!allowed) return { success: false, content: '用户拒绝执行工具 "scan_like"' };
+            if (!decision?.allow) {
+              return {
+                success: false,
+                content: '用户拒绝执行工具 "scan_like"',
+                failureKind: decision?.reason === 'timeout' ? 'timeout' : 'rejected',
+                degradeToAdvice: true,
+              };
+            }
           }
           return { success: true, content: 'scan ok' };
         },
@@ -993,6 +1155,64 @@ describe('AgentRuntime tool plan', () => {
       store.close();
       rmSync(tempDir, { recursive: true, force: true });
     }
+  });
+
+  it('preserves timeout failureKind for permission-request tools', async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      definition: {
+        name: 'scan_like',
+        description: 'mock scan tool',
+        parameters: { type: 'object', properties: {} },
+      },
+      permission: 'owner',
+      confirmRequired: false,
+      execute: async (_args, context) => {
+        const decision = await context.requestPermission?.({
+          action: 'list_files',
+          message: '是否允许扫描该目录？',
+          params: { path: 'C:/secured/docs' },
+          grantKey: 'file:list:C:/secured/docs',
+        });
+        if (!decision?.allow) {
+          return {
+            success: false,
+            content: '用户拒绝执行工具 "scan_like"',
+            failureKind: decision?.reason === 'timeout' ? 'timeout' : 'rejected',
+            degradeToAdvice: true,
+          };
+        }
+        return { success: true, content: 'scan ok' };
+      },
+    } as Tool);
+
+    const runtime = new AgentRuntime({
+      router: new PermissionGrantRouter() as never,
+      systemPrompt: 'test',
+      maxTokens: 1024,
+      toolRegistry: registry,
+      ownerIds: ['owner-1'],
+    });
+
+    const events: Array<unknown> = [];
+    for await (const event of runtime.chat(
+      'sess-permission-timeout',
+      '请扫描这个目录',
+      undefined,
+      'owner-1',
+      async (request) => request.kind === 'permission_request'
+        ? { allow: false, scope: 'once', reason: 'timeout' }
+        : { allow: true, scope: 'once' },
+      'webchat',
+    )) {
+      events.push(event);
+    }
+
+    const toolCall = events.find((event): event is ToolCallEvent =>
+      typeof event === 'object' && event !== null && 'type' in event && (event as { type: string }).type === 'tool_call');
+    expect(toolCall?.success).toBe(false);
+    expect(toolCall?.failureKind).toBe('timeout');
+    expect(toolCall?.degradeToAdvice).toBe(true);
   });
 
   it('skips execute_plan for multi-step plans when every step is already grant-covered', async () => {
@@ -1249,7 +1469,7 @@ describe('AgentRuntime tool plan', () => {
         void event;
       }
 
-      expect(runtime.revokePermissionGrant('web:example.com', 'dingtalk', 'staff-a')).toBe(true);
+      expect(runtime.revokePermissionGrant('web:example.com', 'persistent', 'dingtalk', 'staff-a')).toBe(true);
       expect(store.hasActivePermissionGrant('dingtalk:staff-a', 'web:example.com')).toBe(false);
 
       const thirdRequests: string[] = [];
@@ -1270,6 +1490,135 @@ describe('AgentRuntime tool plan', () => {
       expect(firstRequests).toEqual(['plan', 'confirm']);
       expect(secondRequests).toEqual(['plan', 'confirm']);
       expect(thirdRequests).toEqual([]);
+    } finally {
+      store.close();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('lists and revokes session grants separately from persistent grants', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'crabcrush-runtime-grant-list-'));
+    const dbPath = join(tempDir, 'runtime.db');
+    const store = new ConversationStore(dbPath);
+    const registry = new ToolRegistry();
+    registry.register({
+      definition: {
+        name: 'secure_action',
+        description: 'mock secure tool',
+        parameters: { type: 'object', properties: {} },
+      },
+      permission: 'owner',
+      confirmRequired: true,
+      buildConfirmRequest: () => ({
+        grantKey: 'web:example.com',
+        preview: {
+          title: '访问外部网页',
+          summary: '将访问 example.com',
+          riskLevel: 'medium',
+          targets: ['example.com'],
+        },
+      }),
+      execute: async () => ({ success: true, content: 'secure ok' }),
+    } as Tool);
+
+    const runtime = new AgentRuntime({
+      router: new PerRequestSecureRouter() as never,
+      systemPrompt: 'test',
+      maxTokens: 1024,
+      toolRegistry: registry,
+      ownerIds: ['owner-1'],
+      store,
+    });
+
+    try {
+      for await (const event of runtime.chat(
+        'sess-session',
+        '请执行安全操作',
+        undefined,
+        'owner-1',
+        async (request) => ({ allow: true, scope: request.kind === 'confirm' ? 'session' : 'once' }),
+        'webchat',
+      )) {
+        void event;
+      }
+
+      for await (const event of runtime.chat(
+        'sess-persistent',
+        '请再次执行安全操作',
+        undefined,
+        'owner-1',
+        async (request) => ({ allow: true, scope: request.kind === 'confirm' ? 'persistent' : 'once' }),
+        'webchat',
+      )) {
+        void event;
+      }
+
+      const listed = runtime.listPermissionGrants('webchat', 'owner-1', 'sess-session');
+      expect(listed).toHaveLength(2);
+        expect(listed).toEqual([
+        expect.objectContaining({
+          grantKey: 'web:example.com',
+          scope: 'session',
+          principalKey: 'webchat:default',
+          resourceType: 'domain',
+          resourceValue: 'example.com',
+          sessionId: 'sess-session',
+        }),
+        expect.objectContaining({
+          grantKey: 'web:example.com',
+          scope: 'persistent',
+          principalKey: 'webchat:default',
+          resourceType: 'domain',
+          resourceValue: 'example.com',
+        }),
+      ]);
+
+      expect(runtime.revokePermissionGrant('web:example.com', 'persistent', 'webchat', 'owner-1')).toBe(true);
+      expect(store.hasActivePermissionGrant('webchat:default', 'web:example.com')).toBe(false);
+
+      const afterPersistentRevoke = runtime.listPermissionGrants('webchat', 'owner-1', 'sess-session');
+      expect(afterPersistentRevoke).toHaveLength(1);
+      expect(afterPersistentRevoke[0]).toMatchObject({
+        grantKey: 'web:example.com',
+        scope: 'session',
+        sessionId: 'sess-session',
+      });
+
+      const coveredRequests: string[] = [];
+      for await (const event of runtime.chat(
+        'sess-session',
+        '再执行一次安全操作',
+        undefined,
+        'owner-1',
+        async (request) => {
+          coveredRequests.push(request.kind || 'unknown');
+          return { allow: true, scope: 'once' };
+        },
+        'webchat',
+      )) {
+        void event;
+      }
+
+      expect(coveredRequests).toEqual([]);
+      expect(runtime.revokePermissionGrant('web:example.com', 'session', 'webchat', 'owner-1', 'sess-session')).toBe(true);
+      expect(runtime.listPermissionGrants('webchat', 'owner-1', 'sess-session')).toHaveLength(0);
+
+      const requestsAfterSessionRevoke: string[] = [];
+      for await (const event of runtime.chat(
+        'sess-session',
+        '再执行一次安全操作',
+        undefined,
+        'owner-1',
+        async (request) => {
+          requestsAfterSessionRevoke.push(request.kind || 'unknown');
+          return { allow: true, scope: request.kind === 'confirm' ? 'session' : 'once' };
+        },
+        'webchat',
+      )) {
+        void event;
+      }
+
+      expect(requestsAfterSessionRevoke).toEqual(['plan', 'confirm']);
     } finally {
       store.close();
       rmSync(tempDir, { recursive: true, force: true });

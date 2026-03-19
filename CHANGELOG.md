@@ -5,6 +5,7 @@
 ---
 
 ## [未发布]
+
 ### 2026-03-19
 
 #### fix: 收口执行底座边界与状态同步
@@ -18,14 +19,16 @@
 - 统一计划确认 / 工具确认 / 权限请求的结构化失败原因，前端与审计可区分拒绝、超时与缺少确认能力
 - 同步 CLI 版本号为 `0.1.0`
 
-#### docs: 同步 README / AGENTS / ROADMAP 到当前实现状态
+#### docs: 收口文档体系并明确职责边界
 
-- README 更新 WebChat token 访问方式，以及文件/联网工具的当前权限边界
-- 配置示例补充 `agent.confirmTimeoutMs`，并明确 `ownerIds` 场景下 WebChat 需写入 `webchat:default`
-- AGENTS 更新为 2026-03-19 的真实阶段描述，明确 2a 基础版已交付、下一步转向收口
-- ROADMAP 标记钉钉 Block Streaming、审计持久化、运行时权限请求、作用域授权、执行预览、拒绝后降级、审计回放等已落地项
-- DEC-031 与 `docs/DESIGN/permissions.md` 改为“设计 + 当前实现状态”同步表述
-- 收口 `docs/ARCHITECTURE.md`、`docs/SMART_EXPERIENCE_PLAN.md`、`docs/VISION.md` 中易误导的旧状态说明
+- README 收回到“项目介绍 + 上手 + 当前能力边界”，不再重复承担 AI 协作说明
+- AGENTS 收回到“AI 工作入口”，只保留规则、权威来源、当前阶段、下一步和文档地图
+- ROADMAP 改为聚焦当前 Phase 2a，压缩已完成阶段和远期阶段的细粒度待办
+- VISION 改为聚焦产品定位、战略优先级和成功标准，不再承载过深的参考材料
+- 合并 `docs/DESIGN/permissions.md` 与 `docs/DESIGN/actionable-errors.md` 为 `docs/DESIGN/execution-ux.md`
+- 将 `docs/OPENCLAW_ANALYSIS.md` 移至 `docs/reference/OPENCLAW_ANALYSIS.md`
+- 将 `docs/SMART_EXPERIENCE_PLAN.md` 移至 `docs/archive/SMART_EXPERIENCE_PLAN.md`
+- 清理 `CHANGELOG.md` 中不再适合作为标准 changelog 的开发过程记录
 
 ### 2026-03-18
 
@@ -89,17 +92,12 @@
   - `persistent` 会写入 SQLite，并在后续会话或重启后继续复用
 - 为 plan / permission / confirm / tool execution 链路补充统一 `operationId`，方便把一次执行串成完整审计轨迹
 - `audit.log` 继续保留为运维/debug 日志；产品侧查询与回放改走 SQLite `audit_events`
-- WebChat 新增最小版“审计回放”时间线，可按会话查看：
-  - 执行计划
-  - 批准/拒绝结果
-  - 权限确认
-  - 工具执行与结果
+- WebChat 新增最小版“审计回放”时间线，可按会话查看执行计划、批准/拒绝结果、权限确认、工具执行与结果
 - WebChat 确认弹窗新增“永久允许”选项；钉钉支持文本确认 `允许 永久 <id>`
-- 优化计划确认体验：当本轮是“单步操作”且对应资源已被 `session` 或 `persistent` 授权覆盖时，跳过重复的 `execute_plan` 确认，避免已授权操作反复弹窗
+- 优化计划确认体验：当本轮是“单步操作”且对应资源已被 `session` 或 `persistent` 授权覆盖时，跳过重复的 `execute_plan` 确认
 - 修复持久授权 `lastUsedAt` 的刷新时机：仅在真实执行复用授权时更新，不再把“计划阶段的授权覆盖判断”误记为一次使用
 - 新增持久授权恢复、审计查询、WebChat 回放、钉钉永久授权解析等测试用例
 - 全量测试与构建通过
-- 未修改计划文件，仅落地代码、测试与变更记录
 
 #### feat: 计划审批、作用域授权与更安全的执行流
 
@@ -164,191 +162,60 @@
 #### docs: prompt dedup
 
 - 去除示例配置与向导中的 systemPrompt，统一使用默认提示词
+
 ### 2026-02-24
 
 #### docs: streamline documentation for AI-assisted development
 
 - Add minimal reading paths / when-to-read guides across core docs (AGENTS/README/ROADMAP/ARCHITECTURE/VISION/DECISIONS)
-- Move long ROADMAP design details into `docs/DESIGN/` (permissions, actionable errors) with an index
+- Move long ROADMAP design details into `docs/DESIGN/`
 - Fix README wording to match current file tool sandbox (`tools.fileBase` relative paths only)
 
 ### 2026-02-17
 
 #### feat: WebChat 体验优化
 
-- **新建会话**：侧边栏「新建」按钮，点击后清空当前会话、显示欢迎页；服务端 `newSession` 消息重置 sessionId，下一条消息创建新会话
-- **消息历史分页**：首次加载最近 100 条；滚动到顶自动加载更早消息（sticky「加载更早的消息」按钮）；DB `getRecentMessages` 支持 offset
-- **会话列表分页**：超过 50 条时显示「加载更多」，支持 offset 分页
-- **工具调用后自然语言不展示**：修复 Gateway 在收到 `done` 且含 `toolCalls` 时不向客户端发送 `done`，避免提前结束 streaming 导致后续模型回复被忽略
-- **list_files 文件名不区分大小写**：pattern 匹配（如 `*.MD`）对文件名做 case-insensitive 比较
+- 新建会话、历史分页、会话列表分页、停止按钮与工具后自然语言总结体验优化
+- `list_files` 的 pattern 对文件名大小写不敏感
 
 #### feat: write_file 内置工具（Phase 2a.3）
 
-- 写入 ~/.crabcrush 下文件，自动创建父目录
-- 路径穿越检查、扩展名白名单（与 read_file 一致）
-- confirmRequired: true（待 2a.2 确认机制实现后生效）
-
-#### fix: system prompt 简化
-
-- 移除工具级示例列举，改为通用原则：「调用工具后，必须用自然语言向用户总结结果并给出建议」
-
-#### docs: 已知问题记录
-
-- ROADMAP 新增「已知问题」表：工具调用刷新后丢失、search_web 提案式沟通待改进
-
-### 2026-02-13
-
-#### feat: WebChat 历史对话列表（多会话切换）
-
-- 点击 header「会话」按钮打开侧边栏，展示 webchat 渠道的会话列表
-- 点击会话项切换并加载该会话历史
-- 存储层 `listConversations` 支持按 channel 筛选
-
-#### fix: WebChat 历史记录与停止按钮
-
-- **历史记录**：sessionId 优先从 URL 的 `?session=xxx` 读取，收到 session 时写入 URL；避免多 Tab 共享 localStorage 时被覆盖，导致刷新后加载错误会话
-- **停止按钮**：chunk / done 处理器增加 `isStreaming` 检查，忽略 stop 后迟到的 chunk，避免产生孤立消息；避免重复处理 done
-
-#### fix: 刷新后历史记录只显示第一条
-
-- **根因**：历史渲染时调用未定义的 `addCopyButton`，抛出 ReferenceError 导致循环中断
-- **做法**：移除 addCopyButton 调用（fence 渲染器已内置复制按钮）；用 DocumentFragment 批量插入；收到 history 时始终清空再渲染；loadHistory 使用 getAllMessages 获取完整历史；ws.onopen 时从 URL 重读 sessionId
-
-#### fix: 工具调用后自然语言总结
-
-- **问题**：list_files 等工具调用后，模型只输出「用 read_file 读取」等引用说明，缺少自然语言总结
-- **做法**：优化默认 system prompt，引导模型在工具调用后用自然语言总结结果并给出建议，例如 list_files 后应简要列出关键文件并询问用户想查看哪个
-
-#### docs: ARCHITECTURE.md 精简
-
-- 550 行 → 74 行：删除大段 TypeScript 接口代码（实现时写在 src/ 中）
-- 保留：系统全景图、模块职责、部署模式、数据存储、OpenClaw 对比
-- AGENTS.md：信息权威来源表更新「接口定义在代码中」
-
-#### feat: read_file 根目录可配置
-
-- **tools.fileBase**：YAML 配置项，可指定 read_file 可读取的根目录（默认 ~/.crabcrush）
-- **CRABCRUSH_FILE_BASE**：环境变量优先于 YAML
-- 错误提示显示实际 base 路径（如 ~/.crabcrush 或 ~/Documents）
-- README、crabcrush.example.yaml 补充配置说明
-
-#### docs: 规划与文档更新
-
-- **ROADMAP**：Phase 2a 版本节奏（v0.2.0–v0.5.0 对应表）；技术债务表（限流、日志、confirmRequired、WS 连接数）
-- **可操作错误消息**：Chromium 未安装时一键安装设计（WebChat/钉钉/飞书兼容）
-- **运行时权限请求**：Cursor 式动态确认（访问新路径、安装软件、执行命令前主动询问）
-- **DEC-033**：关键依赖取舍（better-sqlite3、Playwright）及替代方案
+- 写入 `~/.crabcrush` 下文件，自动创建父目录
+- 路径穿越检查、扩展名白名单
+- `confirmRequired: true`（后续确认机制落地后正式生效）
 
 ### 2026-02-15
 
 #### feat: 内置工具 read_file（Phase 2a.3 文件操作）
 
-- **read_file**：读取 ~/.crabcrush 下的文本文件（.md/.txt/.json/.yaml 等）
-- 权限：owner（DEC-026）；安全：路径限制、拒绝 .. 穿越、扩展名白名单
-- 截断：默认 8000 字符（DEC-030）；`CRABCRUSH_FILE_BASE` 可覆盖根目录
+- `read_file`：读取 `~/.crabcrush` 下的文本文件
+- 权限：owner；安全：路径限制、拒绝 `..` 穿越、扩展名白名单
+- 截断：默认 8000 字符；`CRABCRUSH_FILE_BASE` 可覆盖根目录
 
 #### fix: WebChat 前端本地化（解决国内 CDN 超时）
 
-- **问题**：从 cdn.jsdelivr.net 加载 markdown-it、highlight.js 常超时，导致 `window.markdownit is not a function`、favicon 401
-- **做法**：将两库预先放入 `public/vendor/` 并提交，页面优先加载本地文件，不依赖外网
-- **Gateway**：`/favicon.ico`、`/vendor/*` 不再要求 token，避免静态资源 401
-- **scripts/copy-vendor.js**：仅维护者使用，从多 CDN 拉取以刷新 vendor（改 URL 版本号后执行并提交）；普通用户无需运行
-- **package.json**：移除 markdown-it、highlight.js 依赖（运行时只用 public/vendor/）
-- **README**：说明前端库已随仓库提供，克隆即用
+- 前端依赖预置到 `public/vendor/`
+- `/favicon.ico`、`/vendor/*` 不再要求 token
+- 普通用户克隆后即可使用，无需额外跑前端依赖脚本
 
 #### docs: OpenClaw 分析与人格化引用
 
-- 新增 `docs/OPENCLAW_ANALYSIS.md`：规则/记忆/人格化/Token 策略与借鉴建议
-- **AGENTS.md / ROADMAP 2a.5**：人格化与工作区实现参考该文档
-- **README**：参与开发或 AI 协助时请先读 AGENTS.md、DECISIONS.md
+- 新增 `docs/OPENCLAW_ANALYSIS.md`（后续迁移至 `docs/reference/OPENCLAW_ANALYSIS.md`）
+- AGENTS / ROADMAP 开始引用这份参考材料
 
 ### 2026-02-14
 
-#### docs: 人格化与工作区规划（借鉴 OpenClaw）
-
-- **DEC-032**：规划工作区（IDENTITY.md、USER.md、SOUL.md）+ Bootstrap 首次对话
-- **ROADMAP 2a.5**：AI 有名字、知道如何称呼用户、可配置语气，首次对话主动询问并持久化
-- 参考：OpenClaw 的 SOUL/IDENTITY/USER 文件注入 + BOOTSTRAP.md 采访脚本
-
-#### docs: 钉钉 Block Streaming 规划（借鉴 OpenClaw）
-
-- **DEC-031**：规划引入 Block Streaming，钉钉/飞书等渠道按块分片发送，边生成边发
-- **ROADMAP**：Phase 1.1 新增钉钉 Block Streaming 待办，飞书接入时一并抽象为渠道通用能力
-- 参考：OpenClaw `blockStreamingChunk`、`blockStreamingCoalesce`、`textChunkLimit`
-
-#### fix: 钉钉渠道体验优化
-
-- **先发「正在思考…」**：无流式时先给用户即时反馈，再发最终回复
-- **消息截断**：按钉钉 API 限制（text 2000 / markdown 4000 字符）截断，超长加「内容已截断」提示，避免发送失败导致无应答
-- **工具调用提示**：回复中附带「🔧 已调用：search_web、browse_url」等，与 WebChat 体验一致
-
-#### chore: 规划与体验优化
-
-- **ROADMAP**：标注 Phase 2a 里程碑达成（search_web 已实现）
-- **crabcrush doctor**：新增 Playwright Chromium 检测，未安装时提示 `npx playwright install chromium`
-- **README**：快速开始中补充 Playwright 可选安装说明
-- **ARCHITECTURE**：标注当前实现为简化版，目标架构可逐步演进
-
-#### feat: 内置工具 browse_url + search_web（Phase 2a.3 浏览器控制）
-
-AI 可以抓取网页内容、搜索网络，回答「这个链接讲了什么」「帮我搜一下 XX」等问题。
-
-- **browse_url**：打开 URL，提取标题和正文，返回给模型（默认截断 8000 字符）
-- **search_web**：智能多引擎搜索（Google → Bing → 百度），有代理时优先 Google；`CRABCRUSH_SEARCH_ENGINE=google|bing|baidu` 可强制指定
-- 权限：owner（操作本地浏览器，DEC-026）
-- 依赖：Playwright + Chromium，首次使用需执行 `npx playwright install chromium`
-- 超时：15 秒
-
-#### fix: 文档同步 + senderId 传递（查缺补漏）
-
-- **AGENTS.md**：更新当前阶段（Phase 2a 已完成项）、下一步、目录结构（含 storage/tools/cli/router/pricing）
-- **ROADMAP.md**：勾选已实现项（Token 认证、SQLite、滑动窗口、Function Calling、Owner 认证）
-- **senderId 传递**：ChatHandler 增加第 4 参数 senderId；钉钉传 `senderStaffId`；WebChat 传 `sessionId`；`isOwner` 逻辑修正（未配置 ownerIds 时默认所有人是 owner）
-- **DEC-023 / DEC-024**：注明当前实现状态（tsc / Fastify 内置 logger）
-- **REVIEW-2026-02.md**：补充修复记录
-
 #### feat: Function Calling + 工具系统（Phase 2a.2）
 
-CrabCrush 从"能聊天"进化到"能干活"。
-
-- **工具类型系统**（`src/tools/types.ts`）：基于 OpenAI Function Calling 标准格式（DEC-029）
-- **工具注册中心**（`src/tools/registry.ts`）：注册、查找、权限过滤、安全执行
-- **模型层改造**（`src/models/provider.ts`）：支持 `tools` 参数和 `tool_calls` 流式响应解析
-- **Agent 工具执行循环**：模型请求工具 → 执行 → 返回结果 → 模型继续回复（最多 5 轮）
-- **Owner 认证**（DEC-026）：`ownerIds` 配置，未配置时默认所有人是 owner（个人使用），配置后仅 owner 可触发本地操作类工具
-- **内置工具 `get_current_time`**：让 AI 知道当前时间（public 权限，验证端到端流程）
-- **WebChat 工具调用 UI**：紫色卡片展示调用过程（工具名、参数、结果）
-- 新增 11 个工具系统测试（总计 44 个）
+- 工具类型系统、工具注册中心、模型层工具调用支持、Agent 工具执行循环、Owner 认证、`get_current_time`、WebChat 工具调用 UI 全部落地
 
 #### feat: SQLite 对话持久化 + 滑动窗口（Phase 2a.1）
 
-对话历史不再重启即丢，兑现"本地优先"承诺。
-
-- **SQLite 存储层**（`src/storage/database.ts`）：conversations + messages 表，WAL 模式，零配置自动创建 `~/.crabcrush/data/conversations.db`
-- **滑动窗口**：API 只发最近 N 条消息（默认 40 条 = 20 轮），可通过 `agent.contextWindow` 配置调整
-- **WebChat 历史加载**：重连后自动加载历史消息，支持断线恢复
-- 新增 9 个存储层单元测试（总计 33 个）
-- 新增依赖：`better-sqlite3`
+- SQLite 存储层、滑动窗口、WebChat 历史恢复落地
 
 #### feat: WebChat Token 认证（Phase 2a.0 快速胜利）
 
-WebChat 现在需要访问令牌，解决"任何人知道 IP+端口就能使用"的安全隐患。
-
-- 配置 `auth.token` 可设置固定令牌，不设则每次启动自动生成
-- WebSocket 连接和静态页面均需 `?token=xxx` 参数
-- `/health` 端点保持公开（监控用）
-- 无令牌访问时显示友好的提示页面
-- 控制台启动时打印完整的带 token URL
-
-#### docs: 数据安全边界 + Skills 策略 + 阿里云 OpenClaw 对比
-
-4 个核心问题的分析和文档化：渠道能力一致性、Skills 兼容性、数据库操作、数据安全。
-
-- **DEC-028**：明确"本地优先"的真实边界——数据存储和工具执行在本地，但对话内容经过模型 API；定义五道安全防线
-- **DEC-029**：Skills 策略——工具定义用 OpenAI Function Calling 标准，技能打包用自有格式，考虑 MCP 兼容
-- **ROADMAP.md**：Phase 2a 新增 WebChat Token 认证、API 缓存（快速胜利）、数据库查询工具、Skills CLI 命令
-- **README.md**：新增诚实的数据隐私说明（DEC-028 引用）
-- **VISION.md**：补充阿里云生产环境 OpenClaw 的洞察（验证 DEC-027、Stream 模式优势）
+- WebChat 访问令牌、带 token 的完整访问地址、公开 `/health`、友好错误页落地
 
 ---
 
@@ -357,184 +224,24 @@ WebChat 现在需要访问令牌，解决"任何人知道 IP+端口就能使用"
 CrabCrush V1 正式发布。核心能力：WebChat + 钉钉双渠道纯对话，DeepSeek + 通义千问双模型，流式输出。
 
 ### 核心功能
-- **WebChat**：浏览器聊天界面，Markdown 渲染 + 代码高亮 + 一键复制 + 停止生成
-- **钉钉渠道**：Stream 模式（不需要公网 IP），@机器人收发消息，Markdown 卡片，按用户隔离会话
-- **模型适配**：OpenAI 兼容适配器，支持 DeepSeek / 通义千问 / Kimi / GLM / 豆包
-- **模型路由**：自动匹配提供商 + 显式 `providerId/modelName` 格式
-- **模型 Failover**：主模型失败自动切换备选
-- **费用估算**：对话后显示模型名 + token 用量 + 估算费用（¥）
-- **CLI**：`crabcrush start`（启动）、`crabcrush onboard`（向导配置）、`crabcrush doctor`（自检诊断）
-- **配置**：YAML + 环境变量 + Zod 校验，已知提供商 baseURL 自动补全
+
+- WebChat：浏览器聊天界面，Markdown 渲染 + 代码高亮 + 一键复制 + 停止生成
+- 钉钉渠道：Stream 模式（不需要公网 IP），@机器人收发消息，Markdown 卡片，按用户隔离会话
+- 模型适配：OpenAI 兼容适配器，支持 DeepSeek / 通义千问 / Kimi / GLM / 豆包
+- 模型路由：自动匹配提供商 + 显式 `providerId/modelName` 格式
+- 模型 Failover：主模型失败自动切换备选
+- 费用估算：对话后显示模型名 + token 用量 + 估算费用（¥）
+- CLI：`crabcrush start`、`crabcrush onboard`、`crabcrush doctor`
+- 配置：YAML + 环境变量 + Zod 校验，已知提供商 `baseURL` 自动补全
 
 ### 工程
+
 - TypeScript strict + Fastify v5 + Commander.js + Vitest
 - ESLint flat config + GitHub Actions CI（Node 20 + 22）
 - 24 个单元测试全部通过
 
 ### 文档
-- 21 条决策记录（DEC-001 ~ DEC-027）
-- 钉钉机器人接入指南（guide/dingtalk-setup.md）
-- OpenClaw 深度对比分析 + Phase 2 策略（DEC-027：工具优先于新渠道）
-- README "为什么不直接用 ChatGPT" 对比表
 
----
-
-## 开发过程记录
-
-### 2026-02-13
-
-#### docs: 文档整合 + "为什么不用 ChatGPT" + 本地持久化规划
-
-文档体系优化：减少文件数量，补充核心价值主张，规划数据持久化。
-
-- **README.md**：新增"为什么不直接用 ChatGPT？"对比表（费用、隐私、入口、定制、工具能力），解释"本地优先"的真正含义
-- **ROADMAP.md**：Phase 2a 新增 2a.1"本地对话持久化"（SQLite 存储、历史恢复、搜索、导出），解决当前会话仅在内存中的问题
-- **ARCHITECTURE.md**：合并 `DEPLOYMENT_MODES.md` 为第五章"部署模式"，文件数从 5 减到 4
-- **VISION.md**：3.3-3.5 远期能力（工具/语音/安全详细表格）精简为一段摘要 + ROADMAP 引用
-- **AGENTS.md**：更新目录结构和文档体系表（移除 DEPLOYMENT_MODES.md）
-- 删除 `docs/DEPLOYMENT_MODES.md`（内容已合并）
-
-#### docs: OpenClaw 深度对比 + Phase 2 策略调整
-
-与参考项目 OpenClaw 进行全面对比分析，提炼核心洞察并更新文档。
-
-- **VISION.md**：补充 OpenClaw 痛点对比表（成本高 50-100 倍、部署复杂、需要公网 IP），明确"不应该学的"（原生 App、大而全），更新"借鉴 vs 自研"表格增加状态列
-- **ROADMAP.md**：Phase 2a 重构——从"工具调用与飞书接入"改为"工具调用（让 CrabCrush 能干活）"，优先级调整为：Function Calling > 浏览器控制 > Skills 框架 > 飞书渠道
-- **DECISIONS.md**：新增 DEC-027（Phase 2 策略：工具能力优先于新渠道）
-- **AGENTS.md**：决策数更新至 21 条，记录对比分析完成
-
-#### chore: ESLint + GitHub Actions CI
-
-V1 发布前的工程基建。
-
-- **ESLint**：flat config（ESLint 9 + @typescript-eslint），`pnpm lint` 零错误
-- **GitHub Actions CI**：push/PR 到 main 自动跑 lint → build → test，覆盖 Node 20 + 22
-- 新增 `pnpm lint` script
-
-#### feat: CLI tools - crabcrush onboard + doctor
-
-新用户引导和自检诊断。
-
-- **`crabcrush onboard`** — 向导式配置：
-  - 交互式选择模型提供商（DeepSeek / 通义千问 / Kimi / GLM / 豆包）
-  - 输入 API Key（附带各平台获取链接）
-  - 选择模型（提供默认值）
-  - 可选配置钉钉机器人
-  - 自动生成 `crabcrush.yaml`
-- **`crabcrush doctor`** — 自检诊断：
-  - Node.js 版本检查（>= 20）
-  - 配置文件检测（YAML 文件 / 环境变量）
-  - 模型配置校验（API Key 预览）
-  - API 连通性测试（10s 超时，区分 401 / 网络错误）
-  - 渠道状态汇总
-  - 所有检查通过 / 有问题的清晰反馈
-
-#### feat: model router, failover, cost estimation
-
-智能模型路由 + 自动 Failover + 费用估算。
-
-- **模型路由器**（`src/models/router.ts`）：
-  - `agent.model` 自动匹配正确的提供商（`qwen-max` → qwen，`deepseek-chat` → deepseek）
-  - 支持显式格式 `providerId/modelName`（如 `qwen/qwen-max`）
-  - 修复同时配多个提供商时请求发错 API 的问题
-- **Model Failover**：
-  - 新增 `agent.fallbackModels` 配置
-  - 主模型 5xx / 超时 / 网络错误时自动切换备选模型，用户无感知
-  - 4xx 错误（API Key / 余额问题）不触发 Failover
-  - 启动日志显示完整 Failover 链
-- **费用估算**（`src/models/pricing.ts`）：
-  - 内置 DeepSeek / 通义千问 / Kimi / GLM 主要模型定价
-  - WebChat 每次对话后显示：模型名 | token 用量 | 估算费用
-  - 修复 WebChat 在 usage 为空时不显示模型名的 bug
-- 所有已配置的提供商统一初始化，不再只用第一个
-- 新增 12 个测试（ModelRouter 8 个 + 费用估算 3 个 + 原有 1 个），共 24 个
-
-#### chore: review, bug fixes, docs update
-
-项目全面审查 + 修复 + 文档同步。
-
-- **Bug 修复：**
-  - `dingtalk.ts`：`stop()` 后消息到达不再崩溃（添加 null guard）
-  - `dingtalk.ts`：短消息日志不再多余追加 `...`
-  - `config/loader.ts`：用户指定 `-c` 不存在的路径时报错，而非静默忽略
-- **文档同步：**
-  - `AGENTS.md`：当前阶段从 Phase 0.3 更新到 Phase 1，技术栈改为实际值，目录结构改为实际结构
-  - `ROADMAP.md`：Phase 0.2 / 0.3 / 1.1 已完成项标记为 `[x]`
-  - `README.md`：精简钉钉教程为链接，更新导航栏
-- **新增：**
-  - `CHANGELOG.md`：更新日志
-  - `guide/dingtalk-setup.md`：钉钉机器人接入完整指南（含 FAQ）
-- **测试：** 新增配置路径校验测试，13/13 全部通过
-
-#### feat: Phase 1 - DingTalk Stream adapter + channel abstraction (`fc4c137`)
-
-钉钉渠道接入，第一个外部渠道。
-
-- 新增 `ChannelAdapter` 接口（`src/channels/types.ts`），统一渠道抽象
-- 新增钉钉 Stream 适配器（`src/channels/dingtalk.ts`）
-  - 通过 `dingtalk-stream` SDK 长连接，不需要公网 IP
-  - 收到 @机器人 消息后调用 Agent，通过 sessionWebhook 回复
-  - 按 `senderStaffId` 隔离会话，同群不同人独立上下文
-  - 自动检测 Markdown 特征，长文本用 Markdown 格式回复
-- 配置系统支持钉钉（`channels.dingtalk` + 环境变量 `CRABCRUSH_DINGTALK_*`）
-- CLI 启动时自动连接钉钉（如已配置）
-- 新增渠道相关测试（`test/channels.test.ts`）
-
-#### chore: add ws dev dependency (`37b47db`)
-
-- 添加 `ws` + `@types/ws` 为 dev 依赖，用于 WebSocket E2E 测试
-
-#### docs: update progress to Phase 0.3 MVP (`ee172c5`)
-
-- 更新 `AGENTS.md` 当前阶段为 Phase 0.3 MVP
-
-#### feat: complete Phase 0.3 MVP features (`11db27b`)
-
-WebChat 和核心引擎的完善，从"能跑"到"好用"。
-
-- WebSocket 支持 `stop` 消息 + `AbortController` 中断生成
-- WebSocket ping/pong 保活 + 优雅关闭（SIGINT/SIGTERM）
-- 模型适配器增强：30s 超时、5xx 自动重试 1 次、友好错误提示（401/402/429）
-- Agent Runtime 增加系统提示词注入 + `maxTokens` 控制
-- WebChat 全面升级：
-  - Markdown 渲染（markdown-it + highlight.js CDN）
-  - 代码块语法高亮 + 复制按钮
-  - 停止生成按钮
-  - 流式打字光标效果
-  - session 持久化（localStorage）
-  - token 用量显示
-
-#### feat: MVP core - config, model adapter, agent runtime, WebChat (`4d2f1e9`)
-
-核心功能首次实现，从骨架到最小可用。
-
-- 配置系统：YAML 文件 + 环境变量 + Zod 校验
-  - 5 个国产模型 baseURL 预置（deepseek / qwen / kimi / glm / doubao）
-  - 环境变量 `CRABCRUSH_<PROVIDER>_API_KEY` 自动注入
-- OpenAI 兼容模型适配器（`src/models/provider.ts`）：SSE 流式解析
-- Agent Runtime（`src/agent/runtime.ts`）：会话管理 + 多轮上下文
-- Gateway WebSocket 端点（`/ws`）：chat 消息收发 + 流式 chunk 推送
-- WebChat 首版（`public/index.html`）：暗色主题、发送消息、接收流式回复
-- CLI `crabcrush start` 命令：加载配置 → 初始化模型 → 启动 Gateway
-- 新增配置和模型测试
-
-#### feat: initial project scaffolding (`0244d52`)
-
-项目从零开始搭建。
-
-- 项目文档体系：AGENTS.md / DECISIONS.md / ROADMAP.md / ARCHITECTURE.md / VISION.md
-- 技术选型：TypeScript + Node.js + pnpm + Fastify v5 + Vitest
-- 基础 Gateway 骨架：Fastify 服务 + `/health` 端点
-- CLI 入口：Commander.js
-- TypeScript strict mode 配置
-- GPL-3.0 License
-
-
-
-
-
-
-
-
-
-
+- 决策记录（DEC-001 ~ DEC-027）
+- 钉钉机器人接入指南
+- README“为什么不直接用 ChatGPT”对比表

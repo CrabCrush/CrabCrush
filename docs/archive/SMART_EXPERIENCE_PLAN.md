@@ -1,7 +1,7 @@
 # CrabCrush 智能体验优化规划
 
 > 历史文档：本文主要记录 2026-02 那轮“体验差、不智能”反馈后的回滚分析与重做思路。
-> 它**不再代表当前项目状态**。当前进度以 `AGENTS.md` 为准，短期计划以 `docs/ROADMAP.md` 为准，关键决策以 `docs/DECISIONS.md` 为准。
+> 它**不再代表当前项目状态**。当前进度以 `../../AGENTS.md` 为准，短期计划以 `../ROADMAP.md` 为准，关键决策以 `../DECISIONS.md` 为准。
 
 ## 当前说明（2026-03-19）
 
@@ -82,7 +82,7 @@
 | 无「用户拒绝」处理 | 明确：用户说「不用了」→ 停止，用默认人格 |
 | 无记忆槽 | 考虑 USER.md / IDENTITY.md 变量注入，而非整块拼进 prompt |
 
-**建议**：2a.5 重做时，参考 `docs/OPENCLAW_ANALYSIS.md`，采用「BOOTSTRAP 分步 + 行为规则」设计。
+**建议**：2a.5 重做时，参考 `../reference/OPENCLAW_ANALYSIS.md`，采用「BOOTSTRAP 分步 + 行为规则」设计。
 
 ### 3.3 工具与 CRUD（中优先级）
 
@@ -136,9 +136,9 @@
 
 ## 五、参考资料
 
-- `docs/OPENCLAW_ANALYSIS.md`：OpenClaw 人格、记忆、Bootstrap 实现
-- `docs/ROADMAP.md`：Phase 2a 任务与 DoD
-- `docs/DECISIONS.md`：DEC-032 人格化决策
+- `../reference/OPENCLAW_ANALYSIS.md`：OpenClaw 人格、记忆、Bootstrap 实现
+- `../ROADMAP.md`：Phase 2a 任务与 DoD
+- `../DECISIONS.md`：DEC-032 人格化决策
 
 ---
 
